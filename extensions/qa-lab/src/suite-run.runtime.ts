@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   defaultQaSuiteConcurrencyForTransport,
   normalizeQaTransportId,
+  selectQaTransportDriver,
 } from "./qa-transport-registry.js";
 import { readQaBootstrapScenarioCatalog } from "./scenario-catalog.js";
 import {
@@ -34,9 +35,15 @@ export async function runQaFlowSuiteFromRuntime(params?: QaSuiteRunParams): Prom
   const repoRoot = path.resolve(params?.repoRoot ?? process.cwd());
   const requestedModels = resolveRequestedQaSuiteModels(params ?? {});
   const transportId = normalizeQaTransportId(params?.transportId);
+  const channelId = params?.channelId ?? params?.channelDriverSelection?.channel ?? transportId;
+  const channelDriver = selectQaTransportDriver({
+    channelDriver: params?.channelDriver,
+    channelDriverSelection: params?.channelDriverSelection,
+    channelId: params?.channelId,
+    transportId,
+  });
   const outputDir = await resolveQaSuiteOutputDir(repoRoot, params?.outputDir);
   const catalog = readQaBootstrapScenarioCatalog();
-  const channelDriver = params?.channelDriver ?? params?.channelDriverSelection?.channelDriver;
   const selectedScenarios = selectQaFlowSuiteScenarios({
     scenarios: catalog.scenarios,
     scenarioIds: params?.scenarioIds,
@@ -97,6 +104,7 @@ export async function runQaFlowSuiteFromRuntime(params?: QaSuiteRunParams): Prom
     repoRoot,
     outputDir,
     transportId,
+    channelId,
     selectedScenarios,
     providerMode,
     primaryModel,
@@ -130,7 +138,7 @@ export async function runQaFlowSuiteFromRuntime(params?: QaSuiteRunParams): Prom
     return await runQaRuntimeParitySuite({
       runQaFlowSuite: runQaFlowSuiteFromRuntime,
       adapterFactories: params.adapterFactories,
-      channelId: params.channelId,
+      channelId,
       adapterOptions: params.adapterOptions,
       evidenceMode: params.evidenceMode,
       repoRoot,
@@ -139,7 +147,7 @@ export async function runQaFlowSuiteFromRuntime(params?: QaSuiteRunParams): Prom
       providerMode,
       transportId,
       channelDriverSelection: params.channelDriverSelection,
-      channelDriver: params.channelDriver,
+      channelDriver,
       primaryModel,
       alternateModel,
       fastMode,

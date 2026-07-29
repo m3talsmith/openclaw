@@ -236,7 +236,12 @@ describe("qa cli runtime", () => {
                 model: { name: "gpt-5.6-luna", ref: "mock-openai/gpt-5.6-luna" },
                 fixture: "mock-openai",
               },
-              channel: { id: "qa-channel", live: false },
+              channel: {
+                id: "qa-channel",
+
+                driver: "qa-channel",
+                live: false,
+              },
               packageSource: { kind: "source-checkout" },
               artifacts: [],
             },
@@ -553,6 +558,8 @@ describe("qa cli runtime", () => {
                   },
                   channel: {
                     id: "qa-channel",
+
+                    driver: "qa-channel",
                     live: false,
                   },
                   packageSource: {

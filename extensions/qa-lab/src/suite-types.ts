@@ -7,6 +7,7 @@ import type { QaThinkingLevel } from "./qa-gateway-config.js";
 import type {
   QaTransportAdapterFactory,
   QaTransportFactoryContext,
+  QaTransportDriver,
   QaTransportId,
 } from "./qa-transport-registry.js";
 import type { QaReportCheck } from "./report.js";
@@ -91,6 +92,7 @@ export type QaSuiteResolvedRunContext = {
   repoRoot: string;
   outputDir: string;
   transportId: QaTransportId;
+  channelId: string;
   selectedScenarios: ReturnType<
     typeof import("./scenario-catalog.js").readQaBootstrapScenarioCatalog
   >["scenarios"];
@@ -98,7 +100,7 @@ export type QaSuiteResolvedRunContext = {
   primaryModel: string;
   alternateModel: string;
   fastMode: boolean;
-  channelDriver?: QaScorecardChannelDriver;
+  channelDriver: QaTransportDriver;
   enabledPluginIds: string[];
   gatewayConfigPatch: ReturnType<
     typeof import("./suite-planning.js").collectQaSuiteGatewayConfigPatch

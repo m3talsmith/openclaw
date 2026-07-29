@@ -21,6 +21,7 @@ import type { QaThinkingLevel } from "./qa-gateway-config.js";
 import {
   createQaTransportAdapter,
   type QaTransportAdapterFactory,
+  type QaTransportDriver,
   type QaTransportFactoryContext,
   type QaTransportId,
 } from "./qa-transport-registry.js";
@@ -82,28 +83,21 @@ export type QaSuiteStartLabFn = (params?: QaLabServerStartParams) => Promise<QaL
 export async function createQaSuiteTransportAdapter(params: {
   adapterOptions?: QaSuiteRunParams["adapterOptions"];
   adapterFactories?: readonly QaTransportAdapterFactory[];
-  channelDriver?: QaScorecardChannelDriver | null;
-  channelId?: string;
-  channelDriverSelection?: OpenClawCrablineChannelDriverSelection | null;
+  channelDriver: QaTransportDriver;
+  channelId: string;
   cleanupOnFailure?: () => Promise<void>;
   outputDir: string;
   transportPolicy?: NonNullable<QaSuiteRunParams["adapterOptions"]>["transportPolicy"];
   state: QaLabServerHandle["state"];
-  transportId: QaTransportId;
 }) {
   try {
-    const usesLiveAdapter =
-      params.channelDriver === "live" &&
-      params.channelId !== undefined &&
-      params.adapterFactories !== undefined;
+    if (params.channelDriver === "live" && !params.adapterFactories) {
+      throw new Error("channelDriver=live requires a contributed adapter factory");
+    }
     return await createQaTransportAdapter(
       {
-        channelId: params.channelId ?? params.channelDriverSelection?.channel ?? params.transportId,
-        driver: usesLiveAdapter
-          ? "live"
-          : params.channelDriverSelection
-            ? "crabline"
-            : params.transportId,
+        channelId: params.channelId,
+        driver: params.channelDriver,
         outputDir: params.outputDir,
         adapterOptions: {
           ...params.adapterOptions,
@@ -118,7 +112,7 @@ export async function createQaSuiteTransportAdapter(params: {
         },
         state: params.state,
       },
-      usesLiveAdapter ? params.adapterFactories : undefined,
+      params.channelDriver === "live" ? params.adapterFactories : undefined,
     );
   } catch (error) {
     await params.cleanupOnFailure?.().catch(() => undefined);

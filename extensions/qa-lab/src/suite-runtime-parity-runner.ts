@@ -43,7 +43,7 @@ export async function runQaRuntimeParitySuite(params: {
   runQaFlowSuite: QaSuiteRunner;
   adapterOptions?: QaSuiteRunParams["adapterOptions"];
   adapterFactories?: readonly QaTransportAdapterFactory[];
-  channelId?: string;
+  channelId: string;
   evidenceMode?: QaScorecardEvidenceMode;
   repoRoot: string;
   outputDir: string;
@@ -56,7 +56,7 @@ export async function runQaRuntimeParitySuite(params: {
   thinkingDefault?: QaThinkingLevel;
   claudeCliAuthMode?: QaCliBackendAuthMode;
   enabledPluginIds?: string[];
-  channelDriver?: QaScorecardChannelDriver | null;
+  channelDriver: QaScorecardChannelDriver;
   channelDriverSelection?: OpenClawCrablineChannelDriverSelection | null;
   concurrency: number;
   selectedScenarios: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"];
@@ -81,13 +81,11 @@ export async function runQaRuntimeParitySuite(params: {
     adapterFactories: params.adapterFactories,
     channelDriver: params.channelDriver,
     channelId: params.channelId,
-    channelDriverSelection: params.channelDriverSelection,
     adapterOptions: params.adapterOptions,
     cleanupOnFailure: ownsLab ? () => lab.stop() : undefined,
     outputDir: params.outputDir,
     transportPolicy: collectQaSuiteTransportPolicy(params.selectedScenarios),
     state: lab.state,
-    transportId: params.transportId,
   });
   const transport = transportFactoryResult.adapter;
   const liveScenarioOutcomes: QaLabScenarioOutcome[] = params.selectedScenarios.map((scenario) => ({
@@ -246,12 +244,13 @@ export async function runQaRuntimeParitySuite(params: {
         scenarioDefinitions: params.selectedScenarios,
         evidenceMode: params.evidenceMode,
         transport,
+        channelId: params.channelId,
+        channelDriver: params.channelDriver,
         providerMode: params.providerMode,
         primaryModel: params.primaryModel,
         alternateModel: params.alternateModel,
         fastMode: params.fastMode,
         concurrency: params.concurrency,
-        channelDriver: params.channelDriver,
         channelDriverSelection: params.channelDriverSelection,
         scenarioIds:
           params.scenarioIds && params.scenarioIds.length > 0

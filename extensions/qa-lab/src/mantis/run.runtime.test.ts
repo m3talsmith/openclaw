@@ -50,8 +50,7 @@ describe("mantis before/after runtime", () => {
           { kind: "screenshot", path: screenshotPath },
           { kind: "video", path: videoPath },
         ],
-        channelDriver: "live",
-        channelId: "discord",
+        channel: { id: "discord", driver: "live" },
         scenarioDefinitions: [
           {
             id: "discord-status-reactions-tool-only",

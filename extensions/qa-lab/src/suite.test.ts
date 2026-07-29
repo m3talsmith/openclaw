@@ -116,20 +116,23 @@ describe("qa suite", () => {
     expect(startLab).not.toHaveBeenCalled();
   });
 
-  it("keeps metadata-only live channel drivers on the shared QA transport", async () => {
-    const create = vi.fn();
+  it("rejects conflicting channel driver setup", async () => {
+    const startLab = vi.fn();
 
     await expect(
-      qaSuiteProgressTesting.createQaSuiteTransportAdapter({
-        adapterFactories: [{ id: "telegram", matches: () => true, create }],
+      runQaFlowSuite({
         channelDriver: "live",
-        outputDir: "/tmp/qa-output",
-        state: {} as QaLabServerHandle["state"],
-        transportId: "qa-channel",
+        channelDriverSelection: {
+          capabilityMatrixPath: "crabline-fake-provider-capabilities.json",
+          channel: "telegram",
+          channelDriver: "crabline",
+          smokeArtifactPath: "crabline-fake-provider-smoke.json",
+        },
+        startLab,
       }),
-    ).resolves.toMatchObject({ adapter: { id: "qa-channel" } });
+    ).rejects.toThrow("channelDriver=live conflicts with adapter setup driver=crabline");
 
-    expect(create).not.toHaveBeenCalled();
+    expect(startLab).not.toHaveBeenCalled();
   });
 
   it("records live transport preparation as the first shared flow step", async () => {
@@ -185,7 +188,6 @@ describe("qa suite", () => {
         outputDir: "/tmp/qa-output",
         transportPolicy: { requireGroupMention: true },
         state: {} as QaLabServerHandle["state"],
-        transportId: "qa-channel",
       }),
     ).resolves.toMatchObject({ adapter });
 
@@ -210,7 +212,6 @@ describe("qa suite", () => {
       channelId: "telegram",
       outputDir: "/tmp/qa-output",
       state: {} as QaLabServerHandle["state"],
-      transportId: "qa-channel",
     });
 
     expect(create).toHaveBeenCalledWith(
@@ -509,6 +510,8 @@ describe("qa suite", () => {
           id: "qa-channel",
           createReportNotes: () => [],
         } as unknown as QaTransportAdapter,
+        channelId: "qa-channel",
+        channelDriver: "qa-channel",
         providerMode: "mock-openai",
         primaryModel: "mock-openai/gpt-5.6-luna",
         alternateModel: "mock-openai/gpt-5.6-luna-alt",
@@ -545,6 +548,8 @@ describe("qa suite", () => {
           id: "qa-channel",
           createReportNotes: () => [],
         } as unknown as QaTransportAdapter,
+        channelId: "qa-channel",
+        channelDriver: "qa-channel",
         providerMode: "mock-openai",
         primaryModel: "mock-openai/gpt-5.6-luna",
         alternateModel: "mock-openai/gpt-5.6-luna-alt",
@@ -605,6 +610,8 @@ describe("qa suite", () => {
           id: "qa-channel",
           createReportNotes: () => [],
         } as unknown as QaTransportAdapter,
+        channelId: "telegram",
+        channelDriver: "crabline",
         providerMode: "mock-openai",
         primaryModel: "mock-openai/gpt-5.6-luna",
         alternateModel: "mock-openai/gpt-5.6-luna-alt",
@@ -709,6 +716,8 @@ describe("qa suite", () => {
         id: "qa-channel",
         createReportNotes: () => [],
       } as unknown as QaTransportAdapter,
+      channelId: "telegram",
+      channelDriver: "crabline",
       providerMode: "mock-openai",
       primaryModel: "mock-openai/gpt-5.6-luna",
       alternateModel: "mock-openai/gpt-5.6-luna-alt",
@@ -833,6 +842,7 @@ describe("qa suite", () => {
         outputDir: "/repo/.artifacts/qa-e2e/scenarios/patched-control-ui",
         providerMode: "mock-openai",
         transportId: "qa-channel",
+        channelId: "telegram",
         primaryModel: "mock-openai/gpt-5.6-luna",
         alternateModel: "mock-openai/gpt-5.6-luna-alt",
         fastMode: true,

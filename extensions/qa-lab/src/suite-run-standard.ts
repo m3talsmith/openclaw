@@ -53,12 +53,13 @@ export async function runQaFlowSuiteStandard(
     startedAt,
     repoRoot,
     outputDir,
-    transportId,
+    channelId,
     selectedScenarios,
     providerMode,
     primaryModel,
     alternateModel,
     fastMode,
+    channelDriver,
     enabledPluginIds,
     gatewayConfigPatch,
     gatewayRuntimeOptions,
@@ -81,9 +82,8 @@ export async function runQaFlowSuiteStandard(
   await waitForQaLabReadyOrStopOwned({ lab, ownsLab });
   const transportFactoryResult = await createQaSuiteTransportAdapter({
     adapterFactories: params?.adapterFactories,
-    channelDriver: params?.channelDriver,
-    channelId: params?.channelId,
-    channelDriverSelection: params?.channelDriverSelection,
+    channelDriver,
+    channelId,
     adapterOptions: {
       ...params?.adapterOptions,
       scenarioIds: selectedScenarios.map((scenario) => scenario.id),
@@ -92,7 +92,6 @@ export async function runQaFlowSuiteStandard(
     outputDir,
     transportPolicy: collectQaSuiteTransportPolicy(selectedScenarios),
     state: lab.state,
-    transportId,
   });
   const transport = transportFactoryResult.adapter;
   let mock: Awaited<ReturnType<typeof startQaProviderServer>> | undefined;
@@ -370,12 +369,13 @@ export async function runQaFlowSuiteStandard(
         scenarioDefinitions: selectedScenarios,
         evidenceMode: params?.evidenceMode,
         transport,
+        channelId,
+        channelDriver,
         providerMode,
         primaryModel,
         alternateModel,
         fastMode,
         concurrency,
-        channelDriver: params?.channelDriver,
         channelDriverSelection: params?.channelDriverSelection,
         isolatedWorkers: false,
         writeEvidenceFile: params?.writeEvidenceFile,

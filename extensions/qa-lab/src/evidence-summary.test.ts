@@ -33,7 +33,11 @@ describe("evidence summary", () => {
           codeRefs: ["extensions/qa-channel/src/gateway.ts"],
         },
       ],
-      channelId: "qa-channel",
+      channel: {
+        id: "qa-channel",
+
+        driver: "qa-channel",
+      },
       env: {
         OPENCLAW_QA_CHANNEL_DRIVER: "local-shim",
         OPENCLAW_QA_REF: "abc123",
@@ -93,8 +97,9 @@ describe("evidence summary", () => {
         },
         channel: {
           id: "qa-channel",
+
           live: false,
-          driver: "local-shim",
+          driver: "qa-channel",
         },
         packageSource: {
           kind: "source-checkout",
@@ -123,93 +128,6 @@ describe("evidence summary", () => {
     });
   });
 
-  it.each([
-    ["live Discord transport", "discord", "live", undefined, "live", true],
-    ["live Matrix transport", "matrix", "live", undefined, "live", true],
-    ["live Slack transport", "slack", "live", undefined, "live", true],
-    ["live Telegram transport", "telegram", "live", undefined, "live", true],
-    ["live WhatsApp transport", "whatsapp", "live", undefined, "live", true],
-    [
-      "live transport without a bundled channel identity",
-      "custom-live-transport",
-      "live",
-      undefined,
-      "live",
-      true,
-    ],
-    [
-      "synthetic driver for a real channel identity",
-      "telegram",
-      "qa-channel",
-      undefined,
-      "qa-channel",
-      false,
-    ],
-    [
-      "Crabline driver for a real channel identity",
-      "telegram",
-      "crabline",
-      undefined,
-      "crabline",
-      false,
-    ],
-    [
-      "live driver selected through the QA environment",
-      "custom-live-transport",
-      undefined,
-      { OPENCLAW_QA_CHANNEL_DRIVER: "live" },
-      "live",
-      true,
-    ],
-    [
-      "live driver selected through the E2E environment",
-      "custom-live-transport",
-      undefined,
-      { OPENCLAW_E2E_CHANNEL_DRIVER: "live" },
-      "live",
-      true,
-    ],
-    [
-      "explicit synthetic driver overriding live environment",
-      "telegram",
-      "qa-channel",
-      { OPENCLAW_QA_CHANNEL_DRIVER: "live" },
-      "qa-channel",
-      false,
-    ],
-    [
-      "transport without a resolved driver",
-      "custom-live-transport",
-      undefined,
-      undefined,
-      undefined,
-      false,
-    ],
-  ] as const)(
-    "records actual channel liveness for %s independently of model liveness",
-    (_label, channelId, channelDriver, env, expectedDriver, expectedLive) => {
-      const evidence = buildQaSuiteEvidenceSummary({
-        artifactPaths: [],
-        channelId,
-        channelDriver,
-        env,
-        generatedAt: "2026-07-25T00:00:00.000Z",
-        primaryModel: "mock-openai/gpt-5.6-luna",
-        providerMode: "mock-openai",
-        scenarioDefinitions: [{ id: "channel-liveness", title: "Channel liveness" }],
-        scenarioResults: [{ name: "Channel liveness", status: "pass" }],
-      });
-
-      expect(validateQaEvidenceSummaryJson(evidence)).toEqual(evidence);
-      expect(evidence.entries[0]?.execution?.channel).toEqual({
-        id: channelId,
-        live: expectedLive,
-        driver: expectedDriver,
-      });
-      expect(evidence.entries[0]?.execution?.provider.live).toBe(false);
-    },
-  );
-
   it("prefers the checked-out ref over an inherited GitHub event SHA", () => {
     const repoRoot = process.cwd();
     const checkedOutRef = execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
@@ -218,7 +136,7 @@ describe("evidence summary", () => {
     }).trim();
     const evidence = buildQaSuiteEvidenceSummary({
       artifactPaths: [],
-      channelId: "qa-channel",
+      channel: { id: "qa-channel", live: false },
       env: {
         GITHUB_SHA: "bd479958c04a1eadbda8b6105e0722588d71e9ad",
       } as NodeJS.ProcessEnv,
@@ -227,10 +145,14 @@ describe("evidence summary", () => {
       providerMode: "mock-openai",
       repoRoot,
       scenarioDefinitions: [{ id: "ref-probe", title: "Ref probe" }],
-      scenarioResults: [{ name: "Ref probe", status: "pass" }],
+      scenarioResults: [{ name: "Ref probe", status: "blocked" }],
     });
 
     expect(evidence.entries[0]?.execution?.environment.ref).toBe(checkedOutRef);
+    expect(evidence.entries[0]?.execution?.channel).toEqual({
+      id: "qa-channel",
+      live: false,
+    });
   });
 
   it("builds Vitest runner evidence entries", () => {
@@ -413,7 +335,7 @@ describe("evidence summary", () => {
           },
         },
       ],
-      channelId: "qa-channel",
+      channel: { id: "qa-channel", live: false },
       env: {
         OPENCLAW_QA_PROFILE: "experimental-profile",
       } as NodeJS.ProcessEnv,
@@ -445,7 +367,7 @@ describe("evidence summary", () => {
             },
           },
         ],
-        channelId: "qa-channel",
+        channel: { id: "qa-channel", live: false },
         generatedAt: "2026-06-07T12:09:00.000Z",
         primaryModel: "mock-openai/gpt-5.6-luna",
         providerMode: "mock-openai",
@@ -473,7 +395,7 @@ describe("evidence summary", () => {
           },
         },
       ],
-      channelId: "qa-channel",
+      channel: { id: "qa-channel", live: false },
       generatedAt: "2026-06-07T12:10:00.000Z",
       primaryModel: "anthropic/claude-opus-4-8",
       providerMode: "mock-openai",

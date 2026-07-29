@@ -161,6 +161,29 @@ export function normalizeQaTransportId(input?: string | null): QaTransportId {
   throw new Error(`unsupported QA transport: ${transportId}`);
 }
 
+export function selectQaTransportDriver(params: {
+  channelDriver?: QaTransportDriver | null;
+  channelDriverSelection?: { channelDriver: QaTransportDriver } | null;
+  channelId?: string;
+  transportId: QaTransportId;
+}): QaTransportDriver {
+  const setupDriver = params.channelDriverSelection?.channelDriver;
+  if (params.channelDriver && setupDriver && params.channelDriver !== setupDriver) {
+    throw new Error(
+      `channelDriver=${params.channelDriver} conflicts with adapter setup driver=${setupDriver}`,
+    );
+  }
+  if (setupDriver) {
+    return setupDriver;
+  }
+  if (params.channelDriver === "crabline") {
+    throw new Error("channelDriver=crabline requires Crabline adapter setup");
+  }
+  return params.channelDriver === "live" && !params.channelId
+    ? params.transportId
+    : (params.channelDriver ?? params.transportId);
+}
+
 export async function createQaTransportAdapter(
   context: QaTransportFactoryContext,
   factories?: readonly QaTransportAdapterFactory[],

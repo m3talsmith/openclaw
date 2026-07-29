@@ -101,6 +101,8 @@ function makeRetryTestContext(): QaSuiteResolvedRunContext {
     repoRoot: "/qa-repo",
     outputDir: "/qa-output",
     transportId: "qa-channel",
+    channelId: "qa-channel",
+    channelDriver: "qa-channel",
     selectedScenarios: [makeQaSuiteTestScenario("runtime-soak-100-turn")],
     providerMode: "live-frontier",
     primaryModel: "openai/gpt-5.6-luna",

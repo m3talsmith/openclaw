@@ -64,6 +64,7 @@ export function buildQaIsolatedScenarioWorkerParams(params: {
   outputDir: string;
   providerMode: QaProviderMode;
   transportId: QaTransportId;
+  channelId: string;
   channelDriver?: QaScorecardChannelDriver;
   channelDriverSelection?: OpenClawCrablineChannelDriverSelection | null;
   primaryModel: string;
@@ -76,7 +77,7 @@ export function buildQaIsolatedScenarioWorkerParams(params: {
   return {
     adapterFactories: params.input?.adapterFactories,
     adapterOptions: params.input?.adapterOptions,
-    channelId: params.input?.channelId,
+    channelId: params.channelId,
     repoRoot: params.repoRoot,
     sutOpenClawCommand: params.input?.sutOpenClawCommand,
     outputDir: params.outputDir,

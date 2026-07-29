@@ -44,6 +44,8 @@ describe("buildQaSuiteSummaryJson", () => {
   it("records Crabline channel-driver metadata when selected", () => {
     const json = buildQaSuiteSummaryJson({
       ...baseParams,
+      channel: "telegram",
+      channelDriver: "crabline",
       channelDriverSelection: {
         capabilityMatrixPath: "crabline-fake-provider-capabilities.json",
         channel: "telegram",
@@ -61,11 +63,12 @@ describe("buildQaSuiteSummaryJson", () => {
   it("records declarative non-Crabline channel-driver metadata", () => {
     const json = buildQaSuiteSummaryJson({
       ...baseParams,
+      channel: "telegram",
       channelDriver: "live",
     });
 
     expect(json.run.channelDriver).toBe("live");
-    expect(json.run.channel).toBeNull();
+    expect(json.run.channel).toBe("telegram");
     expect(json.run.channelCapabilityMatrixPath).toBeNull();
     expect(json.run.channelDriverSmokePath).toBeNull();
   });
@@ -170,7 +173,7 @@ describe("buildQaSuiteSummaryJson", () => {
           },
         },
       ],
-      channelId: "qa-channel",
+      channel: { id: "qa-channel", driver: "qa-channel" },
       generatedAt: "2026-04-11T00:05:00.000Z",
       primaryModel: "mock-openai/gpt-5.6-luna",
       providerMode: "mock-openai",
