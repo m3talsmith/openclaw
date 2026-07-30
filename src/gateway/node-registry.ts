@@ -15,6 +15,7 @@ import type {
   NodePluginToolDescriptor,
   NodeSkillDescriptor,
 } from "../../packages/gateway-protocol/src/schema/nodes.js";
+import { NODE_INVOKE_SESSION_KEY_ENVELOPE_PROTOCOL_FEATURE } from "../../packages/gateway-protocol/src/schema/nodes.js";
 import { setActiveNodeContext } from "../infra/active-node-context.js";
 import { NODE_MCP_TOOLS_CALL_COMMAND } from "../infra/node-commands.js";
 import type { NodePairingBinding } from "../infra/node-pairing-state.js";
@@ -252,6 +253,7 @@ export class NodeRegistry {
   private nodesById = new Map<string, PairingBoundNodeSession>();
   private nodesByConn = new Map<string, string>();
   private eventTransportsByConn = new Map<string, NodeEventTransport>();
+  private protocolFeaturesByConn = new Map<string, ReadonlySet<string>>();
   private pendingInvokes = new Map<string, PendingInvoke>();
   private invokeStreams = new NodeInvokeStreamController({
     pendingInvokes: this.pendingInvokes,
@@ -515,6 +517,7 @@ export class NodeRegistry {
     const replacesPresence = previousSession?.lastActiveAtMs !== undefined;
     this.nodesById.set(nodeId, session);
     this.nodesByConn.set(client.connId, nodeId);
+    this.protocolFeaturesByConn.set(client.connId, new Set());
     if (previousSession && previousSession.connId !== client.connId) {
       // Install the replacement first so retiring its old invokes cannot
       // remove the new session or publish a false offline transition.
@@ -558,6 +561,7 @@ export class NodeRegistry {
     }
     this.nodesByConn.delete(connId);
     this.eventTransportsByConn.delete(connId);
+    this.protocolFeaturesByConn.delete(connId);
     const unregistersCurrentNode = this.nodesById.get(nodeId)?.connId === connId;
     if (unregistersCurrentNode) {
       const hadPresence = this.nodesById.get(nodeId)?.lastActiveAtMs !== undefined;
@@ -953,6 +957,19 @@ export class NodeRegistry {
     });
     return node;
   }
+
+  updateProtocolFeatures(
+    nodeId: string,
+    connId: string | undefined,
+    features: readonly string[],
+  ): NodeSession | null {
+    const node = this.nodesById.get(nodeId);
+    if (!node || node.connId !== connId) {
+      return null;
+    }
+    this.protocolFeaturesByConn.set(node.connId, new Set(features));
+    return node;
+  }
   updateSurface(
     nodeId: string,
     surface: {
@@ -1139,6 +1156,10 @@ export class NodeRegistry {
     });
     // Keep node and Gateway on the same timer-safe value; zero disables both deadlines.
     const timeoutMs = resolveTimerTimeoutMs(params.timeoutMs, 30_000, 0);
+    const supportsSessionKeyEnvelope = this.protocolFeaturesByConn
+      .get(node.connId)
+      ?.has(NODE_INVOKE_SESSION_KEY_ENVELOPE_PROTOCOL_FEATURE);
+    const sessionKey = normalizeString(params.sessionKey);
     const payload = {
       id: requestId,
       nodeId: params.nodeId,
@@ -1147,7 +1168,9 @@ export class NodeRegistry {
         "params" in params && invokeParams !== undefined ? JSON.stringify(invokeParams) : null,
       timeoutMs,
       idempotencyKey: params.idempotencyKey,
-      sessionKey: normalizeString(params.sessionKey) || undefined,
+      // Non-empty attribution is additive and understood by legacy nodes.
+      // Only the explicit clear signal requires feature negotiation.
+      ...(sessionKey ? { sessionKey } : supportsSessionKeyEnvelope ? { sessionKey: null } : {}),
     };
     const systemRunEvent = resolvePendingSystemRunEvent({
       command: params.command,
