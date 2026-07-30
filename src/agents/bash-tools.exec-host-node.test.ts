@@ -355,6 +355,7 @@ function createNodeHostRequest(
 
 type MockNodeInvokeParams = {
   command?: string;
+  sessionKey?: string;
   params?: Record<string, unknown>;
 };
 
@@ -954,6 +955,10 @@ describe("executeNodeHostCommand", () => {
     const call = requireGatewayCall(2);
     expect(call.options.timeoutMs).toBe(35_000);
     expect(call.callOptions).toEqual({ scopes: ["operator.write", "operator.approvals"] });
+    expect(requireGatewayCommand("system.run.prepare").params?.sessionKey).toBe(
+      "requested-session",
+    );
+    expect(call.params?.sessionKey).toBe("prepared-session");
     const runParams = requireRunParams(call);
     expect(runParams.approved).toBe(true);
     expect(runParams.approvalDecision).toBe("allow-once");
@@ -3543,7 +3548,12 @@ describe("executeNodeHostCommand", () => {
       FOO: "bar",
     });
     expect(requireGatewayCommand("system.run.prepare").params?.params?.cwd).toBe("/tmp/work");
-    const runParams = requireRunParams(requireGatewayCommand("system.run"));
+    expect(requireGatewayCommand("system.run.prepare").params?.sessionKey).toBe(
+      "requested-session",
+    );
+    const runCall = requireGatewayCommand("system.run");
+    expect(runCall.params?.sessionKey).toBe("prepared-session");
+    const runParams = requireRunParams(runCall);
     expect(runParams.env).toEqual({ FOO: "bar" });
     expect(runParams.cwd).toBe("/tmp/work");
     const evalEnvs = evaluateShellAllowlistMock.mock.calls.map(
@@ -3563,6 +3573,7 @@ describe("executeNodeHostCommand", () => {
     expect(callGatewayToolMock).toHaveBeenCalledTimes(1);
     const call = requireGatewayCall(0);
     expect(call.options.timeoutMs).toBe(35_000);
+    expect(call.params?.sessionKey).toBe("requested-session");
     const runParams = requireRunParams(call);
     expect(runParams.command).toEqual(["/bin/sh", "-lc", "bun ./script.ts"]);
     expect(runParams.rawCommand).toBe("bun ./script.ts");
