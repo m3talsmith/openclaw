@@ -16,8 +16,8 @@ import type {
   UserTurnInput,
   UserTurnTranscriptRecorder,
 } from "../../sessions/user-turn-transcript.types.js";
-import type { ExecApprovalContinuationPromptRange } from "../bash-tools.exec-approval-output.js";
 import type { AgentExecutionAttribution } from "../agent-execution-attribution.js";
+import type { ExecApprovalContinuationPromptRange } from "../bash-tools.exec-approval-output.js";
 import type { ExecElevatedDefaults } from "../bash-tools.exec-types.js";
 import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
 import type { CliSessionBindingFacts } from "../cli-runner/types.js";
