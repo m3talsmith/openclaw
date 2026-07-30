@@ -30,6 +30,16 @@ export type WizardStep = {
   };
 };
 
+/** Remove secret prefill before a wizard step crosses a client boundary. */
+export function sanitizeWizardStepForClient(step: WizardStep): WizardStep {
+  if (step.sensitive !== true || step.initialValue === undefined) {
+    return step;
+  }
+  const safe = { ...step };
+  delete safe.initialValue;
+  return safe;
+}
+
 type WizardSessionStatus = "running" | "done" | "cancelled" | "error";
 
 type WizardNextResult = {
