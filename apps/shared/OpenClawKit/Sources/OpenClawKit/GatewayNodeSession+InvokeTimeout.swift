@@ -71,16 +71,20 @@ extension GatewayNodeSession {
                 }
                 guard !Task.isCancelled else { return }
                 timeoutLogger.info("node invoke timeout fired id=\(request.id, privacy: .public)")
-                latch.resume(BridgeInvokeResponse(
-                    id: request.id,
-                    ok: false,
-                    error: OpenClawNodeError(
-                        code: .unavailable,
-                        message: "node invoke timed out")))
+                latch.resume(Self.invokeTimeoutResponse(requestId: request.id))
             }
         }
         timeoutLogger
             .info("node invoke race resolved id=\(request.id, privacy: .public) ok=\(response.ok, privacy: .public)")
         return response
+    }
+
+    static func invokeTimeoutResponse(requestId: String) -> BridgeInvokeResponse {
+        BridgeInvokeResponse(
+            id: requestId,
+            ok: false,
+            error: OpenClawNodeError(
+                code: .unavailable,
+                message: "node invoke timed out"))
     }
 }

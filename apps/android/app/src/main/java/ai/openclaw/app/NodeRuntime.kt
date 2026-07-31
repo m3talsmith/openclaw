@@ -1752,7 +1752,7 @@ class NodeRuntime private constructor(
       },
       onEvent = ::handleNodeGatewayEvent,
       onInvoke = { req ->
-        invokeDispatcher.handleInvoke(req.command, req.paramsJson)
+        invokeDispatcher.handleInvoke(req)
       },
       onTlsFingerprint = { stableId, fingerprint ->
         prefs.saveGatewayTlsFingerprint(stableId, fingerprint)
