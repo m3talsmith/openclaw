@@ -700,6 +700,8 @@ class ChannelsPage extends OpenClawLightDomElement {
           selectedChannel: this.selectedChannel,
           wizard: this.wizardHost.state,
           wizardMultiselect: this.wizardHost.multiselect,
+          wizardTextValue: this.wizardHost.textValue,
+          wizardSecretVisible: this.wizardHost.secretVisible,
           setupBlockedByDirtyConfig: this.wizardHost.blockedByDirtyConfig,
           onShowDetail: (channelId) => {
             this.selectedChannel = channelId;
@@ -710,6 +712,8 @@ class ChannelsPage extends OpenClawLightDomElement {
           onStartSetup: (channelId) => this.wizardHost.startSetup(channelId),
           onWizardAnswer: (value) => this.wizardHost.answer(value),
           onWizardToggleMultiselect: (value) => this.wizardHost.toggleMultiselect(value),
+          onWizardTextInput: (value) => this.wizardHost.setTextValue(value),
+          onWizardToggleSecretVisibility: () => this.wizardHost.toggleSecretVisibility(),
           onWizardClose: () => this.wizardHost.close(),
           onRefresh: (probe) => void context.channels.refresh(probe),
           onPairingRefresh: () => void context.channels.refreshPairing(),

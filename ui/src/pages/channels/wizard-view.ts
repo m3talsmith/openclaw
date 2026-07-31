@@ -3,8 +3,10 @@
 import "@awesome.me/webawesome/dist/components/radio/radio.js";
 import "@awesome.me/webawesome/dist/components/radio-group/radio-group.js";
 import { html, nothing, type TemplateResult } from "lit";
+import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";
 import "../../components/modal-dialog.ts";
+import "../../components/tooltip.ts";
 import { copyToClipboard } from "../../lib/clipboard.ts";
 import { channelDocsUrl, channelHubMeta, renderChannelArt } from "./hub-meta.ts";
 import type {
@@ -19,6 +21,10 @@ type ChannelWizardViewProps = {
   // Pending multiselect toggles live in page state so re-renders keep them.
   multiselectValues: readonly unknown[];
   onToggleMultiselect: (value: unknown) => void;
+  textValue: string;
+  secretVisible: boolean;
+  onTextInput: (value: string) => void;
+  onToggleSecretVisibility: () => void;
   onAnswer: (value: unknown) => void;
   onClose: () => void;
   // WhatsApp QR linking phase (wizard done + channel === whatsapp).
@@ -29,10 +35,6 @@ type ChannelWizardViewProps = {
   onWhatsAppStart: (force: boolean) => void;
   onWhatsAppWait: () => void;
 };
-
-function stepKeyboardValue(step: ChannelWizardStep): string {
-  return typeof step.initialValue === "string" ? step.initialValue : "";
-}
 
 function stepIsBusy(props: ChannelWizardViewProps): boolean {
   return props.wizard.phase === "step" && props.wizard.busy;
@@ -155,22 +157,50 @@ function renderTextStep(step: ChannelWizardStep, props: ChannelWizardViewProps) 
     const input = form.elements.namedItem("wizard-text") as HTMLInputElement | null;
     props.onAnswer(input?.value ?? "");
   };
+  const secretVisibilityLabel = props.secretVisible
+    ? t("configForm.hideValue")
+    : t("configForm.revealValue");
   return html`
     <form @submit=${submit}>
       <div class="channels-wizard__message">
         <label for="channel-wizard-text-input">${step.message ?? ""}</label>
       </div>
-      <input
-        id="channel-wizard-text-input"
-        class="input"
-        style="margin-top: 10px; width: 100%;"
-        name="wizard-text"
-        type=${step.sensitive ? "password" : "text"}
-        autocomplete=${step.sensitive ? "off" : "on"}
-        placeholder=${step.placeholder ?? ""}
-        .value=${stepKeyboardValue(step)}
-        ?disabled=${stepIsBusy(props)}
-      />
+      <span
+        class=${step.sensitive
+          ? "settings-secret channels-wizard__secret"
+          : "channels-wizard__text"}
+      >
+        <input
+          id="channel-wizard-text-input"
+          class="input"
+          name="wizard-text"
+          type=${step.sensitive && !props.secretVisible ? "password" : "text"}
+          autocomplete=${step.sensitive ? "off" : "on"}
+          spellcheck=${step.sensitive ? "false" : "true"}
+          placeholder=${step.placeholder ?? ""}
+          .value=${props.textValue}
+          ?disabled=${stepIsBusy(props)}
+          @input=${(event: Event) =>
+            props.onTextInput((event.currentTarget as HTMLInputElement).value)}
+        />
+        ${step.sensitive
+          ? html`
+              <openclaw-tooltip .content=${secretVisibilityLabel}>
+                <button
+                  type="button"
+                  class="settings-secret__toggle"
+                  aria-label=${secretVisibilityLabel}
+                  aria-controls="channel-wizard-text-input"
+                  aria-pressed=${props.secretVisible}
+                  ?disabled=${stepIsBusy(props)}
+                  @click=${props.onToggleSecretVisibility}
+                >
+                  ${props.secretVisible ? icons.eye : icons.eyeOff}
+                </button>
+              </openclaw-tooltip>
+            `
+          : nothing}
+      </span>
       <div class="channels-wizard__footer" style="margin-top: 12px;">
         <button type="submit" class="btn primary" ?disabled=${stepIsBusy(props)}>
           ${t("channels.setup.continue")}
