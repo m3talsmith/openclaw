@@ -3,10 +3,9 @@
 import "@awesome.me/webawesome/dist/components/radio/radio.js";
 import "@awesome.me/webawesome/dist/components/radio-group/radio-group.js";
 import { html, nothing, type TemplateResult } from "lit";
-import { icons } from "../../components/icons.ts";
+import { renderSensitiveInput } from "../../components/sensitive-input.ts";
 import { t } from "../../i18n/index.ts";
 import "../../components/modal-dialog.ts";
-import "../../components/tooltip.ts";
 import { copyToClipboard } from "../../lib/clipboard.ts";
 import { channelDocsUrl, channelHubMeta, renderChannelArt } from "./hub-meta.ts";
 import type {
@@ -157,50 +156,44 @@ function renderTextStep(step: ChannelWizardStep, props: ChannelWizardViewProps) 
     const input = form.elements.namedItem("wizard-text") as HTMLInputElement | null;
     props.onAnswer(input?.value ?? "");
   };
-  const secretVisibilityLabel = props.secretVisible
-    ? t("configForm.hideValue")
-    : t("configForm.revealValue");
+  const input = step.sensitive
+    ? renderSensitiveInput({
+        id: "channel-wizard-text-input",
+        name: "wizard-text",
+        value: props.textValue,
+        revealed: props.secretVisible,
+        revealLabel: t("configForm.revealValue"),
+        hideLabel: t("configForm.hideValue"),
+        className: "channels-wizard__secret",
+        inputClassName: "input",
+        placeholder: step.placeholder,
+        disabled: stepIsBusy(props),
+        onInput: props.onTextInput,
+        onToggle: props.onToggleSecretVisibility,
+      })
+    : html`
+        <span class="channels-wizard__text">
+          <input
+            id="channel-wizard-text-input"
+            class="input"
+            name="wizard-text"
+            type="text"
+            autocomplete="on"
+            spellcheck="true"
+            placeholder=${step.placeholder ?? ""}
+            .value=${props.textValue}
+            ?disabled=${stepIsBusy(props)}
+            @input=${(event: Event) =>
+              props.onTextInput((event.currentTarget as HTMLInputElement).value)}
+          />
+        </span>
+      `;
   return html`
     <form @submit=${submit}>
       <div class="channels-wizard__message">
         <label for="channel-wizard-text-input">${step.message ?? ""}</label>
       </div>
-      <span
-        class=${step.sensitive
-          ? "settings-secret channels-wizard__secret"
-          : "channels-wizard__text"}
-      >
-        <input
-          id="channel-wizard-text-input"
-          class="input"
-          name="wizard-text"
-          type=${step.sensitive && !props.secretVisible ? "password" : "text"}
-          autocomplete=${step.sensitive ? "off" : "on"}
-          spellcheck=${step.sensitive ? "false" : "true"}
-          placeholder=${step.placeholder ?? ""}
-          .value=${props.textValue}
-          ?disabled=${stepIsBusy(props)}
-          @input=${(event: Event) =>
-            props.onTextInput((event.currentTarget as HTMLInputElement).value)}
-        />
-        ${step.sensitive
-          ? html`
-              <openclaw-tooltip .content=${secretVisibilityLabel}>
-                <button
-                  type="button"
-                  class="settings-secret__toggle"
-                  aria-label=${secretVisibilityLabel}
-                  aria-controls="channel-wizard-text-input"
-                  aria-pressed=${props.secretVisible}
-                  ?disabled=${stepIsBusy(props)}
-                  @click=${props.onToggleSecretVisibility}
-                >
-                  ${props.secretVisible ? icons.eye : icons.eyeOff}
-                </button>
-              </openclaw-tooltip>
-            `
-          : nothing}
-      </span>
+      ${input}
       <div class="channels-wizard__footer" style="margin-top: 12px;">
         <button type="submit" class="btn primary" ?disabled=${stepIsBusy(props)}>
           ${t("channels.setup.continue")}
