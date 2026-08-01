@@ -12,13 +12,13 @@ import {
   fetchWithTimeoutGuarded,
   pollProviderOperationJson,
   postMultipartRequest,
+  readProviderBinaryResponse,
   readProviderJsonResponse,
   resolveProviderOperationTimeoutMs,
   resolveProviderHttpRequestConfig,
   sanitizeConfiguredModelProviderRequest,
   type ProviderOperationTimeoutMs,
 } from "openclaw/plugin-sdk/provider-http";
-import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type {
   GeneratedVideoAsset,
@@ -261,21 +261,25 @@ async function downloadOpenAIVideo(
   });
   try {
     const mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
-    const buffer = await readResponseWithLimit(response, params.maxBytes, {
+    const bytes = await readProviderBinaryResponse(response, deadline.label, "video", {
+      maxBytes: params.maxBytes,
       timeoutMs,
       onTimeout: ({ timeoutMs: bodyTimeoutMs }) =>
         new Error(
           `OpenAI generated video download timed out after ${deadline.timeoutMs ?? bodyTimeoutMs}ms`,
         ),
-      onOverflow: ({ maxBytes }) =>
-        new Error(`OpenAI generated video download exceeds ${maxBytes} bytes`),
     });
+    const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     return {
       buffer,
       mimeType,
       fileName: `video-1.${extensionForMime(mimeType)?.slice(1) ?? "mp4"}`,
     };
   } finally {
+    // Header validation can reject before either transport's response body is consumed.
+    if (!response.bodyUsed) {
+      await response.body?.cancel().catch(() => undefined);
+    }
     await release();
   }
 }
