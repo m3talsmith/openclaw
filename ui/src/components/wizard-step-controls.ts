@@ -2,6 +2,7 @@ import { html, nothing, type TemplateResult } from "lit";
 import type { WizardStep } from "../api/types.ts";
 import { t } from "../i18n/index.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
+import { renderSensitiveInput } from "./sensitive-input.ts";
 import "../styles/wizard-step-controls.css";
 
 type WizardStepOption = NonNullable<WizardStep["options"]>[number];
@@ -15,8 +16,10 @@ type WizardStepControlsProps = {
   // The text step pairs `<label for>` with `<input id>`. The caller owns the id
   // so two step controls in one document cannot capture each other's label.
   inputId: string;
+  sensitiveRevealed?: boolean;
   onValueChange: (value: unknown) => void;
   onAnswer: (value: unknown, includeValue?: boolean) => void;
+  onToggleSensitiveVisibility?: () => void;
 };
 
 function renderMessage(step: WizardStep) {
@@ -92,6 +95,33 @@ function renderProgressStep(step: WizardStep) {
 function renderTextStep(props: WizardStepControlsProps) {
   const step = props.step;
   const value = typeof props.value === "string" ? props.value : "";
+  const input =
+    step.sensitive && props.onToggleSensitiveVisibility
+      ? renderSensitiveInput({
+          id: props.inputId,
+          name: "wizard-text",
+          value,
+          revealed: props.sensitiveRevealed === true,
+          revealLabel: t("configForm.revealValue"),
+          hideLabel: t("configForm.hideValue"),
+          inputClassName: "input",
+          placeholder: step.placeholder,
+          disabled: props.busy,
+          onInput: props.onValueChange,
+          onToggle: props.onToggleSensitiveVisibility,
+        })
+      : html`<input
+          id=${props.inputId}
+          class="input"
+          name="wizard-text"
+          type=${step.sensitive ? "password" : "text"}
+          autocomplete=${step.sensitive ? "off" : "on"}
+          placeholder=${step.placeholder ?? ""}
+          .value=${value}
+          ?disabled=${props.busy}
+          @input=${(event: Event) =>
+            props.onValueChange((event.currentTarget as HTMLInputElement).value)}
+        />`;
   return html`
     <form
       class="wizard-step__form"
@@ -105,18 +135,7 @@ function renderTextStep(props: WizardStepControlsProps) {
             <label for=${props.inputId}>${step.message}</label>
           </div>`
         : nothing}
-      <input
-        id=${props.inputId}
-        class="input"
-        name="wizard-text"
-        type=${step.sensitive ? "password" : "text"}
-        autocomplete=${step.sensitive ? "off" : "on"}
-        placeholder=${step.placeholder ?? ""}
-        .value=${value}
-        ?disabled=${props.busy}
-        @input=${(event: Event) =>
-          props.onValueChange((event.currentTarget as HTMLInputElement).value)}
-      />
+      ${input}
       <button type="submit" class="btn primary" ?disabled=${props.busy}>
         ${t("modelSetup.wizard.submit")}
       </button>
@@ -133,7 +152,8 @@ function renderSelectStep(props: WizardStepControlsProps) {
           <label class="wizard-step__option">
             <input
               type="radio"
-              name="wizard-option"
+              name=${`${props.inputId}-option`}
+              ?disabled=${props.busy}
               .checked=${Object.is(props.value, option.value)}
               @change=${() => props.onValueChange(option.value)}
             />
@@ -187,6 +207,7 @@ function renderMultiselectStep(props: WizardStepControlsProps) {
           <label class="wizard-step__option">
             <input
               type="checkbox"
+              ?disabled=${props.busy}
               .checked=${selected.some((value) => Object.is(value, option.value))}
               @change=${(event: Event) => {
                 const checked = (event.currentTarget as HTMLInputElement).checked;
