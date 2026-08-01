@@ -22,7 +22,10 @@ import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import { enqueueCommandInLane, setCommandLaneConcurrency } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
 import { defaultRuntime } from "../../runtime.js";
-import { SystemAgentChatEngine } from "../../system-agent/chat-engine.js";
+import {
+  SystemAgentChatEngine,
+  SystemAgentWizardAnswerError,
+} from "../../system-agent/chat-engine.js";
 import { resolveSystemAgentDelegationKey } from "../../system-agent/delegation-session.js";
 import {
   acknowledgeSystemAgentGreetingDelivery,
@@ -498,6 +501,36 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
     if (!assertValidParams(params, validateSystemAgentChatParams, "openclaw.chat", respond)) {
       return;
     }
+    if (params.message !== undefined && params.wizardAnswer !== undefined) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "Send either message or wizardAnswer, not both."),
+      );
+      return;
+    }
+    if (params.wizardAnswer !== undefined && params.delegation !== undefined) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "Delegated OpenClaw sessions cannot submit structured wizard answers.",
+        ),
+      );
+      return;
+    }
+    if (params.wizardAnswer !== undefined && params.reset === true) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "A wizard answer cannot reset its OpenClaw chat session.",
+        ),
+      );
+      return;
+    }
     await runSystemAgentGatewayTask(async () => {
       const sessions = context.systemAgentSessions;
       const sessionId = params.sessionId;
@@ -538,8 +571,21 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           await existing?.engine.dispose();
         }
         let session = sessions.get(sessionId);
+        if (params.wizardAnswer !== undefined && !session) {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              "No active OpenClaw chat session is awaiting that wizard answer.",
+            ),
+          );
+          return;
+        }
         let greetingAuditSequence: number | undefined;
-        const welcomeOnly = params.message === undefined || !params.message.trim();
+        const welcomeOnly =
+          params.wizardAnswer === undefined &&
+          (params.message === undefined || !params.message.trim());
         if (!session) {
           const inference = params.delegation
             ? await import("../../system-agent/inference-fallback.js").then(
@@ -649,7 +695,10 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
         }
         session.lastUsedAt = Date.now();
         // Inline check (not `welcomeOnly`) so TS narrows params.message below.
-        if (params.message === undefined || !params.message.trim()) {
+        if (
+          params.wizardAnswer === undefined &&
+          (params.message === undefined || !params.message.trim())
+        ) {
           respond(
             true,
             {
@@ -666,12 +715,29 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
         const historyStart = session.engine.historyLength();
         let reply: Awaited<ReturnType<SystemAgentChatEngine["handle"]>>;
         try {
-          reply =
-            params.delegation === undefined && params.context
-              ? await session.engine.handle(params.message, { uiContext: params.context })
-              : await session.engine.handle(params.message);
+          if (params.wizardAnswer !== undefined) {
+            reply = await session.engine.answerWizard(params.wizardAnswer);
+          } else {
+            const message = params.message;
+            if (message === undefined) {
+              respond(
+                false,
+                undefined,
+                errorShape(ErrorCodes.INVALID_REQUEST, "OpenClaw chat input is missing."),
+              );
+              return;
+            }
+            reply =
+              params.delegation === undefined && params.context
+                ? await session.engine.handle(message, { uiContext: params.context })
+                : await session.engine.handle(message);
+          }
         } catch (error) {
           persistEngineHistory(session.engine, historyStart);
+          if (error instanceof SystemAgentWizardAnswerError) {
+            respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+            return;
+          }
           if (!isSystemAgentInferenceUnavailableError(error)) {
             throw error;
           }
