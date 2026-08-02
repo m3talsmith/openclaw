@@ -239,6 +239,38 @@ describe("chat pane header state", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
+  it("cancels header rename when the Gateway source changes for the same session", () => {
+    const patch = vi.fn(async () => ({}));
+    const sessions = { patch } as unknown as SessionCapability;
+    const client = { request: vi.fn(async () => ({})) } as unknown as GatewayBrowserClient;
+    const { pane, state } = createTestChatPane({ client, sessions });
+    const hello = {
+      auth: { role: "operator", scopes: ["operator.write"] },
+      features: { methods: ["sessions.patch"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+    pane.context.gateway.snapshot.hello = hello;
+    state.hello = hello;
+    const session = {
+      key: state.sessionKey,
+      kind: "direct",
+      updatedAt: 0,
+    } satisfies GatewaySessionRow;
+
+    pane.beginHeaderRename(session);
+    pane.headerRenameValue = "Replacement Gateway title";
+    pane.applyGatewaySnapshot({
+      ...pane.context.gateway.snapshot,
+      client: { request: vi.fn(async () => ({})) } as unknown as GatewayBrowserClient,
+      phase: "stopped",
+      hello: null,
+      sessionKey: state.sessionKey,
+    });
+    pane.commitHeaderRename();
+
+    expect(pane.headerEditing).toBe(false);
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it("refuses archived-session restore without exact sessions.patch access", async () => {
     const patch = vi.fn(async () => ({}));
     const sessions = { patch } as unknown as SessionCapability;
