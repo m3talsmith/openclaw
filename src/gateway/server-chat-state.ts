@@ -102,6 +102,7 @@ type ChatRunRecord = {
   registrations?: ChatRunEntry[];
   rawBuffer?: string;
   buffer?: string;
+  mediaUrls?: string[];
   planSnapshot?: ChatRunPlanSnapshot;
   /** Last time any buffered assistant text changed, including suppressed raw buffers. */
   bufferUpdatedAt?: number;
@@ -109,6 +110,7 @@ type ChatRunRecord = {
   /** Length of text at the time of the last broadcast, used to avoid duplicate flushes. */
   deltaLastBroadcastLen?: number;
   deltaLastBroadcastText?: string;
+  deltaLastBroadcastMediaCount?: number;
   agentText?: {
     assistant?: ChatRunAgentTextState;
     thinking?: ChatRunAgentTextState;
@@ -246,11 +248,13 @@ export function createChatRunState(): ChatRunState {
     }
     delete record.rawBuffer;
     delete record.buffer;
+    delete record.mediaUrls;
     delete record.planSnapshot;
     delete record.bufferUpdatedAt;
     delete record.deltaSentAt;
     delete record.deltaLastBroadcastLen;
     delete record.deltaLastBroadcastText;
+    delete record.deltaLastBroadcastMediaCount;
     delete record.agentText;
     store.releaseIfEmpty(runId);
   };

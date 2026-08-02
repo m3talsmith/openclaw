@@ -17,20 +17,51 @@ import {
 
 const MAX_LIVE_CHAT_BUFFER_CHARS = 500_000;
 
-/** Normalizes assistant event payloads that contain a snapshot, a delta, or both. */
+/** Normalizes assistant event payloads that contain text, media, or both. */
 export function resolveAssistantLiveChatInput(
   data: unknown,
-): { text: string; delta: string } | undefined {
+): { text: string; delta: string; mediaUrls: string[] } | undefined {
   if (!data || typeof data !== "object") {
     return undefined;
   }
-  const record = data as { text?: unknown; delta?: unknown };
-  if (typeof record.text !== "string" && typeof record.delta !== "string") {
+  const record = data as {
+    text?: unknown;
+    delta?: unknown;
+    mediaUrl?: unknown;
+    mediaUrls?: unknown;
+  };
+  const mediaUrls: string[] = [];
+  const seenMediaUrls = new Set<string>();
+  const appendMediaUrl = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || seenMediaUrls.has(trimmed)) {
+      return;
+    }
+    seenMediaUrls.add(trimmed);
+    mediaUrls.push(trimmed);
+  };
+  if (Array.isArray(record.mediaUrls)) {
+    for (const mediaUrl of record.mediaUrls) {
+      appendMediaUrl(mediaUrl);
+    }
+  }
+  if (mediaUrls.length === 0) {
+    appendMediaUrl(record.mediaUrl);
+  }
+  if (
+    typeof record.text !== "string" &&
+    typeof record.delta !== "string" &&
+    mediaUrls.length === 0
+  ) {
     return undefined;
   }
   return {
     text: typeof record.text === "string" ? record.text : "",
     delta: typeof record.delta === "string" ? record.delta : "",
+    mediaUrls,
   };
 }
 

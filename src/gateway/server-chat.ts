@@ -278,6 +278,19 @@ function excludeConnIds(
 
 type BroadcastDelta = { deltaText: string; replace?: true };
 
+type LiveAssistantContentBlock = { type: "text"; text: string } | { type: "image"; url: string };
+
+function buildLiveAssistantContent(text: string, mediaUrls: readonly string[]) {
+  const content: LiveAssistantContentBlock[] = [];
+  if (text) {
+    content.push({ type: "text", text });
+  }
+  for (const url of mediaUrls) {
+    content.push({ type: "image", url });
+  }
+  return content;
+}
+
 function resolveBroadcastDelta(params: {
   text: string;
   previousBroadcastText: string | undefined;
@@ -891,6 +904,7 @@ export function createAgentEventHandler({
     seq: number,
     text: string,
     delta?: unknown,
+    mediaUrls: readonly string[] = [],
     opts?: { controlUiVisible?: boolean },
   ) => {
     const run = chatRunState.getOrCreate(clientRunId);
@@ -900,33 +914,50 @@ export function createAgentEventHandler({
       nextText: text,
       nextDelta: typeof delta === "string" ? delta : "",
     });
-    if (!mergedRawText) {
+    if (!mergedRawText && mediaUrls.length === 0) {
       return;
     }
     const now = Date.now();
-    run.rawBuffer = mergedRawText;
-    run.bufferUpdatedAt = now;
-    // Sanitize only after merging. Protected blocks and directive tags can span
-    // delta frames; cleaning each frame independently can expose their contents.
-    const normalizedText = normalizeLiveAssistantBufferedText(mergedRawText);
-    const projected = projectLiveAssistantBufferedText(normalizedText);
-    const mergedText = projected.text;
-    run.buffer = mergedText;
-    if (projected.suppress) {
-      return;
+    let mergedText = "";
+    if (mergedRawText) {
+      run.rawBuffer = mergedRawText;
+      run.bufferUpdatedAt = now;
+      // Sanitize only after merging. Protected blocks and directive tags can span
+      // delta frames; cleaning each frame independently can expose their contents.
+      const normalizedText = normalizeLiveAssistantBufferedText(mergedRawText);
+      const projected = projectLiveAssistantBufferedText(normalizedText);
+      mergedText = projected.text;
+      run.buffer = mergedText;
+      if (projected.suppress) {
+        return;
+      }
     }
     if (shouldHideHeartbeatChatOutput(clientRunId, sourceRunId)) {
       return;
     }
+    const previousMediaCount = run.mediaUrls?.length ?? 0;
+    if (mediaUrls.length > 0) {
+      const mergedMediaUrls = run.mediaUrls ?? [];
+      const seenMediaUrls = new Set(mergedMediaUrls);
+      for (const mediaUrl of mediaUrls) {
+        if (!seenMediaUrls.has(mediaUrl)) {
+          seenMediaUrls.add(mediaUrl);
+          mergedMediaUrls.push(mediaUrl);
+        }
+      }
+      run.mediaUrls = mergedMediaUrls;
+    }
+    const retainedMediaUrls = run.mediaUrls ?? [];
+    const hasFreshMedia = retainedMediaUrls.length > previousMediaCount;
     const last = run.deltaSentAt ?? 0;
-    if (now - last < 150) {
+    if (!hasFreshMedia && now - last < 150) {
       return;
     }
     const broadcastDelta = resolveBroadcastDelta({
       text: mergedText,
       previousBroadcastText: run.deltaLastBroadcastText,
     });
-    if (!broadcastDelta) {
+    if (!broadcastDelta && !hasFreshMedia) {
       return;
     }
     run.deltaSentAt = now;
@@ -940,11 +971,11 @@ export function createAgentEventHandler({
       ...(spawnedBy && { spawnedBy }),
       seq,
       state: "delta" as const,
-      deltaText: broadcastDelta.deltaText,
-      ...(broadcastDelta.replace ? { replace: true as const } : {}),
+      deltaText: broadcastDelta?.deltaText ?? "",
+      ...(broadcastDelta?.replace ? { replace: true as const } : {}),
       message: {
         role: "assistant",
-        content: [{ type: "text", text: mergedText }],
+        content: buildLiveAssistantContent(mergedText, retainedMediaUrls),
         timestamp: now,
       },
     };
@@ -954,6 +985,7 @@ export function createAgentEventHandler({
       controlUiVisible: opts?.controlUiVisible ?? true,
       dropIfSlow: true,
     });
+    run.deltaLastBroadcastMediaCount = retainedMediaUrls.length;
   };
 
   const resolveBufferedChatTextState = (
@@ -991,17 +1023,20 @@ export function createAgentEventHandler({
       clientRunId,
       sourceRunId,
     );
-    if (!text || shouldSuppressSilent || shouldSuppressHeartbeatStreaming) {
+    if (shouldSuppressHeartbeatStreaming) {
       return;
     }
 
     const now = Date.now();
     const run = chatRunState.getOrCreate(clientRunId);
+    const mediaUrls = run.mediaUrls ?? [];
+    const visibleText = shouldSuppressSilent ? "" : text;
     const delta = resolveBroadcastDelta({
-      text,
+      text: visibleText,
       previousBroadcastText: run.deltaLastBroadcastText,
     });
-    if (!delta) {
+    const hasUnflushedMedia = mediaUrls.length !== (run.deltaLastBroadcastMediaCount ?? 0);
+    if (!delta && !hasUnflushedMedia) {
       return;
     }
     const spawnedBy = resolveSpawnedBy(sessionKey);
@@ -1012,11 +1047,11 @@ export function createAgentEventHandler({
       ...(spawnedBy && { spawnedBy }),
       seq,
       state: "delta" as const,
-      deltaText: delta.deltaText,
-      ...(delta.replace ? { replace: true as const } : {}),
+      deltaText: delta?.deltaText ?? "",
+      ...(delta?.replace ? { replace: true as const } : {}),
       message: {
         role: "assistant",
-        content: [{ type: "text", text }],
+        content: buildLiveAssistantContent(visibleText, mediaUrls),
         timestamp: now,
       },
     };
@@ -1028,8 +1063,9 @@ export function createAgentEventHandler({
       controlUiVisible: opts?.controlUiVisible ?? true,
       dropIfSlow: true,
     });
-    run.deltaLastBroadcastLen = text.length;
-    run.deltaLastBroadcastText = text;
+    run.deltaLastBroadcastLen = visibleText.length;
+    run.deltaLastBroadcastText = visibleText;
+    run.deltaLastBroadcastMediaCount = mediaUrls.length;
     run.deltaSentAt = now;
   };
 
@@ -1076,6 +1112,7 @@ export function createAgentEventHandler({
     const { text, shouldSuppressSilent } = resolveBufferedChatTextState(clientRunId, sourceRunId, {
       suppressLeadFragments: false,
     });
+    const mediaUrls = chatRunState.runs.get(clientRunId)?.mediaUrls ?? [];
     // Flush any throttled delta so streaming clients receive the complete text
     // before the final event. The 150 ms throttle in emitChatDelta may have
     // suppressed the most recent chunk, leaving the client with stale text.
@@ -1097,10 +1134,10 @@ export function createAgentEventHandler({
         ...(stopReason && { stopReason }),
         ...(jobState === "done" && opts?.yielded ? { yielded: true as const } : {}),
         message:
-          text && !shouldSuppressSilent
+          (text && !shouldSuppressSilent) || mediaUrls.length > 0
             ? {
                 role: "assistant",
-                content: [{ type: "text", text }],
+                content: buildLiveAssistantContent(shouldSuppressSilent ? "" : text, mediaUrls),
                 timestamp: Date.now(),
               }
             : undefined,
@@ -1627,6 +1664,7 @@ export function createAgentEventHandler({
           evt.seq,
           assistantLiveChatInput.text,
           assistantLiveChatInput.delta,
+          assistantLiveChatInput.mediaUrls,
           {
             controlUiVisible: isControlUiVisible,
           },
