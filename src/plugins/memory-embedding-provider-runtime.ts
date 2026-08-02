@@ -120,6 +120,15 @@ export function getMemoryEmbeddingProvider(
     return memoryAdapter;
   }
 
+  // Exact adapter ids have already won above; auth-provider aliases are valid
+  // only when one registered memory adapter owns that identity.
+  const authProviderMatches = listRegisteredMemoryEmbeddingProviderAdapters().filter(
+    (adapter) => adapter.authProviderId === id,
+  );
+  if (authProviderMatches.length === 1) {
+    return authProviderMatches[0];
+  }
+
   // Resolve the shipped generic provider contract at its registry owner so all
   // memory consumers share one query/document and multimodal adaptation path.
   const embeddingAdapter = getEmbeddingProvider(id, cfg);
