@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { isIncognitoSessionKey } from "./incognito-session-key.js";
 
 export type SessionMutationOperatorScope = "operator.write" | "operator.admin";
@@ -20,10 +21,6 @@ const SESSIONS_DELETE_WRITE_SCOPE_FIELDS: ReadonlySet<string> = new Set([
   "deleteTranscript",
   "archivedOnly",
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
 
 function resolveSessionsPatchRequiredScope(params: unknown): SessionMutationOperatorScope {
   if (!isRecord(params)) {

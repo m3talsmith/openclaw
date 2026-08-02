@@ -102,12 +102,10 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
         ? t("chat.sessionHeader.branchSwitchUnavailable")
         : null;
     const sharingSnapshot = this.context.gateway.snapshot;
-    const sharingMethodsSupported = [
-      "session.visibility.set",
-      "session.members.list",
-      "session.members.add",
-      "session.members.remove",
-    ].some((method) => isGatewayMethodAdvertised(sharingSnapshot, method) !== false);
+    // Sharing was introduced behind this advertised method. Keep the control
+    // hidden for older Gateways that omit method metadata.
+    const sharingMethodsSupported =
+      isGatewayMethodAdvertised(sharingSnapshot, "session.visibility.set") === true;
     const sharingReadAccess = readSessionMethodAccess(sharingSnapshot, {
       method: "session.members.list",
       requiredScope: "operator.read",

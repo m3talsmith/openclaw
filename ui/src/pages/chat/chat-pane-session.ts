@@ -310,15 +310,21 @@ export abstract class ChatPaneSession extends ChatPaneSharing {
       (row.status === "failed" || row.status === "timeout") &&
       (row.lastReadAt == null || failureAt > row.lastReadAt);
     const agentStatusActive = Boolean(row.agentStatus && row.agentStatus.expiresAt > Date.now());
-    if (
-      !this.unreadPatchGuard.shouldPatch(
-        state.sessionKey,
-        row.unread === true || unreadFailure || agentStatusActive,
-      )
-    ) {
+    const unread = row.unread === true || unreadFailure || agentStatusActive;
+    if (!unread) {
+      this.unreadPatchGuard.shouldPatch(state.sessionKey, false);
       return;
     }
     const agentId = parseAgentSessionKey(row.key)?.agentId ?? resolveChatAgentId(state);
+    const access = readSessionMethodAccess(this.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key: row.key, unread: false, agentId },
+    });
+    // Read-only navigation must remain silent: absence of mutation access is
+    // not an operation failure and should not latch the unread retry guard.
+    if (!access.allowed || !this.unreadPatchGuard.shouldPatch(state.sessionKey, true)) {
+      return;
+    }
     const guardKey = state.sessionKey;
     void this.context.sessions.patch(row.key, { unread: false }, { agentId }).catch(() => {
       // Unlatch so later unread snapshots retry; the session capability
