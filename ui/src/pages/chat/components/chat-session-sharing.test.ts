@@ -221,4 +221,43 @@ describe("chat session sharing menu", () => {
     root.querySelector("wa-dropdown")?.dispatchEvent(new CustomEvent("wa-show"));
     expect(onOpen).not.toHaveBeenCalled();
   });
+
+  it("keeps visibility controls usable without member-list support", () => {
+    const onOpen = vi.fn();
+    const onVisibilityChange = vi.fn();
+    const root = mount(
+      renderChatSessionSharing({
+        session: {
+          key: "agent:main:main",
+          kind: "direct",
+          updatedAt: 1,
+          visibility: "shared",
+          sharingRole: "owner",
+        },
+        state: undefined,
+        allowedVisibilities: ["shared", "read-only"],
+        membersAvailable: false,
+        onOpen,
+        onVisibilityChange,
+        onMemberChange: vi.fn(),
+      }),
+    );
+
+    expect(root.querySelector<HTMLButtonElement>(".chat-pane__sharing-trigger")?.disabled).toBe(
+      false,
+    );
+    expect(root.querySelector('wa-dropdown-item[value="visibility:read-only"]')).not.toBeNull();
+    expect(root.textContent).not.toContain("People");
+
+    const dropdown = root.querySelector("wa-dropdown");
+    dropdown?.dispatchEvent(new CustomEvent("wa-show"));
+    dropdown?.dispatchEvent(
+      new CustomEvent("wa-select", {
+        detail: { item: { value: "visibility:read-only" } },
+      }),
+    );
+
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onVisibilityChange).toHaveBeenCalledWith("read-only");
+  });
 });

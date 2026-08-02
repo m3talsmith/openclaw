@@ -17,6 +17,8 @@ export type ChatSessionSharingState = {
 type ChatSessionSharingProps = {
   session: GatewaySessionRow | undefined;
   state: ChatSessionSharingState | undefined;
+  allowedVisibilities?: readonly SessionVisibility[];
+  membersAvailable?: boolean;
   openDisabledReason?: string;
   visibilityDisabledReason?: string;
   memberAddDisabledReason?: string;
@@ -65,8 +67,9 @@ export function renderChatSessionSharing(props: ChatSessionSharingProps) {
   // The shared header owner chip presents createdActor; this picker only manages mutable members.
   const identities =
     result?.identities.filter((identity) => identity.id !== result.owner?.id) ?? [];
-  const allowed = result?.allowedVisibilities ?? [visibility];
+  const allowed = result?.allowedVisibilities ?? props.allowedVisibilities ?? [visibility];
   const canPublish = visibility === "draft" && allowed.includes("shared");
+  const membersAvailable = props.membersAvailable !== false;
   return html`
     <wa-dropdown
       class="chat-pane__sharing-menu"
@@ -138,35 +141,43 @@ export function renderChatSessionSharing(props: ChatSessionSharingProps) {
             </wa-dropdown-item>
           `,
         )}
-      <div class="session-menu__separator" role="separator"></div>
-      <div class="chat-pane__sharing-title">${t("chat.sessionSharing.members")}</div>
-      ${props.state?.loading
-        ? html`<div class="chat-pane__sharing-status">${t("common.loading")}</div>`
-        : identities.length > 0
-          ? identities.map((identity) => {
-              const disabledReason = members.has(identity.id)
-                ? props.memberRemoveDisabledReason
-                : props.memberAddDisabledReason;
-              return html`
-                <wa-dropdown-item
-                  value=${`member:${identity.id}`}
-                  ?disabled=${Boolean(disabledReason)}
-                  title=${disabledReason ?? nothing}
-                >
-                  <span>${identity.label ?? identity.id}</span>
-                  ${members.has(identity.id)
-                    ? html`<span slot="details" aria-label=${t("chat.sessionSharing.selected")}
-                        >${icons.check}</span
-                      >`
-                    : nothing}
-                </wa-dropdown-item>
-              `;
-            })
-          : html`<div class="chat-pane__sharing-status">${t("chat.sessionSharing.noPeople")}</div>`}
-      ${props.state?.error
-        ? html`<div class="chat-pane__sharing-status chat-pane__sharing-status--error">
-            ${props.state.error}
-          </div>`
+      ${membersAvailable
+        ? html`
+            <div class="session-menu__separator" role="separator"></div>
+            <div class="chat-pane__sharing-title">${t("chat.sessionSharing.members")}</div>
+            ${props.state?.loading
+              ? html`<div class="chat-pane__sharing-status">${t("common.loading")}</div>`
+              : identities.length > 0
+                ? identities.map((identity) => {
+                    const disabledReason = members.has(identity.id)
+                      ? props.memberRemoveDisabledReason
+                      : props.memberAddDisabledReason;
+                    return html`
+                      <wa-dropdown-item
+                        value=${`member:${identity.id}`}
+                        ?disabled=${Boolean(disabledReason)}
+                        title=${disabledReason ?? nothing}
+                      >
+                        <span>${identity.label ?? identity.id}</span>
+                        ${members.has(identity.id)
+                          ? html`<span
+                              slot="details"
+                              aria-label=${t("chat.sessionSharing.selected")}
+                              >${icons.check}</span
+                            >`
+                          : nothing}
+                      </wa-dropdown-item>
+                    `;
+                  })
+                : html`<div class="chat-pane__sharing-status">
+                    ${t("chat.sessionSharing.noPeople")}
+                  </div>`}
+            ${props.state?.error
+              ? html`<div class="chat-pane__sharing-status chat-pane__sharing-status--error">
+                  ${props.state.error}
+                </div>`
+              : nothing}
+          `
         : nothing}
     </wa-dropdown>
   `;

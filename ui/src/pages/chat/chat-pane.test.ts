@@ -323,6 +323,46 @@ describe("chat pane header state", () => {
     expect(container.querySelector(".chat-pane__sharing-menu")).toBeNull();
   });
 
+  it("keeps visibility controls available without member-list support", () => {
+    const { pane, state } = createTestChatPane({
+      client: {} as GatewayBrowserClient,
+      sessions: {} as SessionCapability,
+    });
+    pane.context.gateway.snapshot.hello = {
+      auth: { role: "operator", scopes: ["operator.write"] },
+      features: { methods: ["session.visibility.set"] },
+      policy: { allowedSessionVisibilities: ["shared", "read-only"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+    const session = {
+      key: "agent:main:current",
+      kind: "direct",
+      updatedAt: 0,
+      sharingRole: "owner",
+      visibility: "shared",
+    } satisfies GatewaySessionRow;
+    const container = document.createElement("div");
+
+    render(
+      pane.renderPaneHeader(
+        createSessionWorkspaceProps(state),
+        createBackgroundTasksProps(state, { onOpenSession: () => {} }),
+        session,
+        false,
+        undefined,
+        false,
+      ),
+      container,
+    );
+
+    expect(
+      container.querySelector<HTMLButtonElement>(".chat-pane__sharing-trigger")?.disabled,
+    ).toBe(false);
+    expect(
+      container.querySelector('wa-dropdown-item[value="visibility:read-only"]'),
+    ).not.toBeNull();
+    expect(container.textContent).not.toContain("People");
+  });
+
   it("copies the resolved workspace path and branch", async () => {
     const { pane } = createTestChatPane({
       client: {} as GatewayBrowserClient,

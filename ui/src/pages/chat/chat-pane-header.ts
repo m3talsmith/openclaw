@@ -125,6 +125,10 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
       method: "session.members.remove",
       requiredScope: "operator.write",
     });
+    const sharingOpenDisabledReason =
+      sharingReadAccess.allowed || sharingVisibilityAccess.allowed
+        ? undefined
+        : sharingReadAccess.reason;
     const renameAccess = row
       ? readSessionMethodAccess(this.context.gateway.snapshot, {
           method: "sessions.patch",
@@ -197,7 +201,9 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
             state: row
               ? this.sessionSharingStates.get(this.sessionSharingCacheKey(row.key))
               : undefined,
-            openDisabledReason: sharingReadAccess.allowed ? undefined : sharingReadAccess.reason,
+            allowedVisibilities: sharingSnapshot.hello?.policy?.allowedSessionVisibilities,
+            membersAvailable: sharingReadAccess.allowed,
+            openDisabledReason: sharingOpenDisabledReason,
             visibilityDisabledReason: sharingVisibilityAccess.allowed
               ? undefined
               : sharingVisibilityAccess.reason,
