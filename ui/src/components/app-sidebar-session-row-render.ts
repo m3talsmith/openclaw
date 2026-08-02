@@ -114,6 +114,11 @@ export interface SessionListHost {
   toggleSection(sectionId: string): void;
   openNewSession(): void;
   readNewSessionAccess(): import("../lib/session-method-access.ts").SessionMethodAccess;
+  readSessionMutationAccess(request: {
+    method: string;
+    params?: unknown;
+    requiredScope?: "operator.write" | "operator.admin";
+  }): import("../lib/session-method-access.ts").SessionMethodAccess;
   requestOpenNewSession(agentId: string, target?: NewSessionTarget): void;
   setVisibleSessionLimit(sectionId: string, limit: number): void;
   clearSessionSelection(): void;
@@ -149,6 +154,10 @@ export function renderRecentSession(params: {
   display?: CatalogBackingSessionDisplay;
 }) {
   const { host, session, display } = params;
+  const pinAccess = host.readSessionMutationAccess({
+    method: "sessions.patch",
+    params: { key: session.key, pinned: !session.pinned },
+  });
   const label = display?.label ?? session.label;
   const { subtitle, narration } = resolveSidebarSessionSubtitle({
     session,
@@ -346,9 +355,9 @@ export function renderRecentSession(params: {
                 class="session-action session-action--pin"
                 data-sidebar-session-pin="true"
                 type="button"
-                title=${pinLabel}
+                title=${pinAccess.allowed ? pinLabel : pinAccess.reason}
                 aria-label=${pinLabel}
-                ?disabled=${!host.connected}
+                ?disabled=${!pinAccess.allowed}
                 @click=${() => host.toggleSessionPin(session)}
               >
                 ${icons.pin}

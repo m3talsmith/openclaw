@@ -101,6 +101,14 @@ export abstract class AppSidebarBase extends OpenClawLightDomContentsElement {
     });
   }
 
+  readSessionMutationAccess(request: {
+    method: string;
+    params?: unknown;
+    requiredScope?: "operator.write" | "operator.admin";
+  }): SessionMethodAccess {
+    return readSessionMethodAccess(this.connected ? this.context?.gateway.snapshot : null, request);
+  }
+
   requestOpenNewSession(agentId: string, target?: NewSessionTarget): void {
     if (this.readNewSessionAccess().allowed) {
       if (target) {

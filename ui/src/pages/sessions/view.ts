@@ -98,6 +98,13 @@ export type SessionsProps = {
   checkpointLoadingKey: string | null;
   checkpointBusyKey: string | null;
   checkpointErrorByKey: Record<string, string>;
+  patchWriteDisabledReason?: string;
+  patchAdminDisabledReason?: string;
+  groupWriteDisabledReason?: string;
+  deleteArchivedDisabledReason?: string;
+  checkpointBranchDisabledReason?: string;
+  checkpointRestoreDisabledReason?: string;
+  deleteSelectedDisabledReason?: string;
   onFiltersChange: (next: {
     activeMinutes: string;
     limit: string;
@@ -1027,7 +1034,10 @@ export function renderSessions(props: SessionsProps) {
       ? html`
           <button
             class="btn danger"
-            ?disabled=${props.loading || archivedCount === 0}
+            ?disabled=${props.loading ||
+            archivedCount === 0 ||
+            Boolean(props.deleteArchivedDisabledReason)}
+            title=${props.deleteArchivedDisabledReason ?? nothing}
             @click=${props.onDeleteAllArchived}
           >
             ${icons.trash} ${t("sessionsView.deleteAllArchived")}
@@ -1207,7 +1217,12 @@ function renderSessionsTable(props: SessionsProps, ctx: SessionsTableContext) {
       </label>
       ${props.groupBy === "category"
         ? html`
-            <button class="btn btn--sm" @click=${() => props.onRequestNewCategory()}>
+            <button
+              class="btn btn--sm"
+              ?disabled=${Boolean(props.groupWriteDisabledReason)}
+              title=${props.groupWriteDisabledReason ?? nothing}
+              @click=${() => props.onRequestNewCategory()}
+            >
               ${icons.plus} ${t("sessionsView.newGroup")}
             </button>
           `
@@ -1223,7 +1238,8 @@ function renderSessionsTable(props: SessionsProps, ctx: SessionsTableContext) {
             </button>
             <button
               class="btn btn--sm danger"
-              ?disabled=${props.loading}
+              ?disabled=${props.loading || Boolean(props.deleteSelectedDisabledReason)}
+              title=${props.deleteSelectedDisabledReason ?? nothing}
               @click=${props.onDeleteSelected}
             >
               ${icons.trash} ${t("sessionsView.deleteSelected")}
@@ -1650,7 +1666,8 @@ function renderSessionDetailsRow(params: {
               <input
                 class="settings-input"
                 .value=${row.label ?? ""}
-                ?disabled=${props.loading}
+                ?disabled=${props.loading || Boolean(props.patchWriteDisabledReason)}
+                title=${props.patchWriteDisabledReason ?? nothing}
                 placeholder=${t("sessionsView.optionalPlaceholder")}
                 @change=${(e: Event) => {
                   const value =
@@ -1661,14 +1678,14 @@ function renderSessionDetailsRow(params: {
             </label>
             ${renderOverrideSelect({
               label: t("sessionsView.thinking"),
-              disabled: props.loading,
+              disabled: props.loading || Boolean(props.patchAdminDisabledReason),
               options: thinkLevels,
               current: thinking,
               onChange: (value) => props.onPatch(row.key, { thinkingLevel: value || null }),
             })}
             ${renderOverrideSelect({
               label: t("sessionsView.fast"),
-              disabled: props.loading,
+              disabled: props.loading || Boolean(props.patchAdminDisabledReason),
               options: fastLevels,
               current: fastMode,
               onChange: (value) =>
@@ -1678,14 +1695,14 @@ function renderSessionDetailsRow(params: {
             })}
             ${renderOverrideSelect({
               label: t("sessionsView.verbose"),
-              disabled: props.loading,
+              disabled: props.loading || Boolean(props.patchAdminDisabledReason),
               options: verboseLevels,
               current: verbose,
               onChange: (value) => props.onPatch(row.key, { verboseLevel: value || null }),
             })}
             ${renderOverrideSelect({
               label: t("sessionsView.reasoning"),
-              disabled: props.loading,
+              disabled: props.loading || Boolean(props.patchAdminDisabledReason),
               options: reasoningLevels.map((level) => ({
                 value: level,
                 label: level || t("sessionsView.inherit"),
@@ -1750,7 +1767,9 @@ function renderSessionDetailsRow(params: {
                             <div class="session-checkpoint-card__actions">
                               <button
                                 class="btn btn--sm"
-                                ?disabled=${props.checkpointBusyKey === checkpoint.checkpointId}
+                                ?disabled=${props.checkpointBusyKey === checkpoint.checkpointId ||
+                                Boolean(props.checkpointBranchDisabledReason)}
+                                title=${props.checkpointBranchDisabledReason ?? nothing}
                                 @click=${() =>
                                   props.onBranchFromCheckpoint(row.key, checkpoint.checkpointId)}
                               >
@@ -1758,7 +1777,9 @@ function renderSessionDetailsRow(params: {
                               </button>
                               <button
                                 class="btn btn--sm"
-                                ?disabled=${props.checkpointBusyKey === checkpoint.checkpointId}
+                                ?disabled=${props.checkpointBusyKey === checkpoint.checkpointId ||
+                                Boolean(props.checkpointRestoreDisabledReason)}
+                                title=${props.checkpointRestoreDisabledReason ?? nothing}
                                 @click=${() =>
                                   props.onRestoreCheckpoint(row.key, checkpoint.checkpointId)}
                               >

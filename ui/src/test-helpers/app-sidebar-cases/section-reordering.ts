@@ -47,7 +47,7 @@ describe("AppSidebar section reordering", () => {
     if (options.withCatalog) {
       gateway.publish({
         hello: {
-          features: { methods: ["sessions.catalog.list"] },
+          features: { methods: ["sessions.catalog.list", "sessions.groups.put"] },
         } as ApplicationGatewaySnapshot["hello"],
       });
     }
