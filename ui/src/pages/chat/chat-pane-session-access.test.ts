@@ -11,6 +11,43 @@ import { createBackgroundTasksProps } from "./components/chat-background-tasks.t
 import { createSessionWorkspaceProps } from "./components/chat-session-workspace.ts";
 
 describe("chat pane session access", () => {
+  it("refuses ordinary session creation without operator.write", async () => {
+    const sessions = {
+      create: vi.fn(async () => "agent:main:new"),
+    } as unknown as SessionCapability;
+    const client = {} as GatewayBrowserClient;
+    const { pane, state } = createTestChatPane({ client, sessions });
+    pane.context.gateway.snapshot.hello = {
+      auth: { role: "operator", scopes: ["operator.read"] },
+      features: { methods: ["sessions.create"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+
+    await expect(pane.createSession()).resolves.toBe(false);
+
+    expect(sessions.create).not.toHaveBeenCalled();
+    expect(state.lastError).toContain("operator.write");
+    expect(state.chatError).toBe(state.lastError);
+  });
+
+  it("requires operator.admin when session creation inherits an incognito parent", async () => {
+    const sessions = {
+      create: vi.fn(async () => "agent:main:new"),
+    } as unknown as SessionCapability;
+    const client = {} as GatewayBrowserClient;
+    const { pane, state } = createTestChatPane({ client, sessions });
+    state.sessionKey = "agent:main:dashboard:incognito-current";
+    pane.context.gateway.snapshot.hello = {
+      auth: { role: "operator", scopes: ["operator.write"] },
+      features: { methods: ["sessions.create"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+
+    await expect(pane.createSession()).resolves.toBe(false);
+
+    expect(sessions.create).not.toHaveBeenCalled();
+    expect(state.lastError).toContain("operator.admin");
+    expect(state.chatError).toBe(state.lastError);
+  });
+
   it("refuses header rename when sessions.patch is unavailable or lacks write scope", () => {
     for (const hello of [
       {
