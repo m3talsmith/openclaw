@@ -145,7 +145,7 @@ describe("chat session sharing menu", () => {
           loading: false,
           result: {
             sessionKey: "agent:main:main",
-            members: [{ identityId: "alice", addedAt: 1 }],
+            members: [{ identityId: "alice", addedBy: "owner", addedAt: 1 }],
             identities: [
               { type: "human", id: "alice", label: "Alice" },
               { type: "human", id: "bob", label: "Bob" },
@@ -164,9 +164,9 @@ describe("chat session sharing menu", () => {
     );
     const dropdown = root.querySelector("wa-dropdown");
     expect(dropdown).not.toBeNull();
-    expect(root.querySelector('wa-dropdown-item[value="visibility:read-only"]')?.title).toBe(
-      "Requires write",
-    );
+    expect(
+      root.querySelector<HTMLElement>('wa-dropdown-item[value="visibility:read-only"]')?.title,
+    ).toBe("Requires write");
     expect(
       root.querySelector('wa-dropdown-item[value="member:alice"]')?.hasAttribute("disabled"),
     ).toBe(true);

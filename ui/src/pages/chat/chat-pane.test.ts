@@ -180,6 +180,85 @@ describe("chat pane header state", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
+  it("refuses header rename when sessions.patch is unavailable or lacks write scope", () => {
+    for (const hello of [
+      {
+        auth: { role: "operator", scopes: ["operator.write"] },
+        features: { methods: ["sessions.create"] },
+      },
+      {
+        auth: { role: "operator", scopes: ["operator.read"] },
+        features: { methods: ["sessions.patch"] },
+      },
+    ]) {
+      const patch = vi.fn(async () => ({}));
+      const sessions = { patch } as unknown as SessionCapability;
+      const { pane, state, requestUpdate } = createTestChatPane({
+        client: {} as GatewayBrowserClient,
+        sessions,
+      });
+      pane.context.gateway.snapshot.hello =
+        hello as ApplicationContext["gateway"]["snapshot"]["hello"];
+      const session = {
+        key: "agent:main:current",
+        kind: "direct",
+        updatedAt: 0,
+      } satisfies GatewaySessionRow;
+
+      pane.beginHeaderRename(session);
+
+      expect(pane.headerEditing).toBe(false);
+      expect(state.chatError).toBeTruthy();
+      expect(requestUpdate).toHaveBeenCalledOnce();
+      expect(patch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rechecks header rename access before committing", () => {
+    const patch = vi.fn(async () => ({}));
+    const sessions = { patch } as unknown as SessionCapability;
+    const { pane, state } = createTestChatPane({
+      client: {} as GatewayBrowserClient,
+      sessions,
+    });
+    const session = {
+      key: "agent:main:current",
+      kind: "direct",
+      updatedAt: 0,
+    } satisfies GatewaySessionRow;
+
+    pane.beginHeaderRename(session);
+    pane.headerRenameValue = "Blocked rename";
+    pane.context.gateway.snapshot.hello = {
+      auth: { role: "operator", scopes: ["operator.read"] },
+      features: { methods: ["sessions.patch"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+    pane.commitHeaderRename();
+
+    expect(state.chatError).toBeTruthy();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("refuses archived-session restore without exact sessions.patch access", async () => {
+    const patch = vi.fn(async () => ({}));
+    const sessions = { patch } as unknown as SessionCapability;
+    const { pane, state, requestUpdate } = createTestChatPane({
+      client: {} as GatewayBrowserClient,
+      sessions,
+    });
+    pane.context.gateway.snapshot.hello = {
+      auth: { role: "operator", scopes: ["operator.read"] },
+      features: { methods: ["sessions.patch"] },
+    } as ApplicationContext["gateway"]["snapshot"]["hello"];
+
+    await pane.restoreArchivedSession(state.sessionKey);
+
+    expect(state.chatError).toBeTruthy();
+    expect(state.lastError).toBe(state.chatError);
+    expect(requestUpdate).toHaveBeenCalledOnce();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
   it("copies the resolved workspace path and branch", async () => {
     const { pane } = createTestChatPane({
       client: {} as GatewayBrowserClient,
