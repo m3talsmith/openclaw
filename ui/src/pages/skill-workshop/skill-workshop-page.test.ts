@@ -434,9 +434,22 @@ describe("SkillWorkshopPage lifecycle", () => {
         request: vi.fn(async () => ({})),
       } as unknown as GatewayBrowserClient,
     };
-    context.gateway.snapshot = replacement;
+    Object.defineProperty(context.gateway, "snapshot", {
+      configurable: true,
+      get: () => replacement,
+    });
     gatewayListener?.(replacement);
-    sessionList.resolve({ sessions: [] } as SessionsListResult);
+    sessionList.resolve({
+      ts: 0,
+      path: "",
+      count: 0,
+      defaults: {
+        modelProvider: null,
+        model: null,
+        contextTokens: null,
+      },
+      sessions: [],
+    });
     await revision;
 
     expect(create).not.toHaveBeenCalled();
