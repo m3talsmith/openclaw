@@ -168,6 +168,31 @@ describe("reconcileOrphanedRestoredRuns", () => {
     expect(reconcileOrphanedRestoredRuns({ runs, resumedRuns: new Set() })).toBe(false);
     expect(runs.get(entry.runId)).toBe(entry);
   });
+
+  it.each(["reserved", "attempted", "consumed", "accepted", "abandoned"] as const)(
+    "preserves orphaned restart recovery rows in the %s phase",
+    (phase) => {
+      const entry = createRunEntry({
+        execution: {
+          status: "interrupted",
+          startedAt: 1_000,
+          restartRecovery: {
+            sessionMarker: "session-1:1000",
+            idempotencyKey: "subagent-recovery:receipt",
+            phase,
+            ...(phase === "reserved" ? {} : { lifecycleGeneration: "generation-1" }),
+          },
+        },
+      });
+      const runs = new Map([[entry.runId, entry]]);
+      const resumedRuns = new Set([entry.runId]);
+
+      expect(reconcileOrphanedRestoredRuns({ runs, resumedRuns })).toBe(false);
+      expect(runs.get(entry.runId)).toBe(entry);
+      expect(resumedRuns.has(entry.runId)).toBe(true);
+      expect(entry.execution.restartRecovery?.phase).toBe(phase);
+    },
+  );
 });
 
 describe("safeRemoveAttachmentsDir", () => {

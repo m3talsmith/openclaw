@@ -290,7 +290,11 @@ export function reconcileOrphanedRestoredRuns(params: {
       // child sessions. Restore replays the obligation before retiring them.
       continue;
     }
-    if (entry.killReconciliation || entry.terminalOwner === "interrupted-recovery") {
+    if (
+      entry.killReconciliation ||
+      entry.execution.restartRecovery ||
+      entry.terminalOwner === "interrupted-recovery"
+    ) {
       // Provider completion or interrupted recovery still owns these rows.
       // Their bounded reconciliation runs even when the session vanished.
       continue;

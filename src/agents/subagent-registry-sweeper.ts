@@ -84,10 +84,27 @@ export function createSubagentRegistrySweeper(params: {
     source: string,
   ) => Promise<void>;
   getGatewayRecoveryRuntime: () => GatewayRecoveryRuntime | undefined;
+  abandonSubagentRestartRecoveryLaunch: ReturnType<
+    typeof createSubagentRunManager
+  >["abandonSubagentRestartRecoveryLaunch"];
   replaceSubagentRunAfterSteer: ReturnType<
     typeof createSubagentRunManager
   >["replaceSubagentRunAfterSteer"];
-  reserveSwarmCollectorLaunch: (runId: string, idempotencyKey: string) => boolean;
+  markSubagentRestartRecoveryLaunchAttempted: ReturnType<
+    typeof createSubagentRunManager
+  >["markSubagentRestartRecoveryLaunchAttempted"];
+  markSubagentRestartRecoveryLaunchAccepted: ReturnType<
+    typeof createSubagentRunManager
+  >["markSubagentRestartRecoveryLaunchAccepted"];
+  markSubagentRestartRecoveryLaunchConsumed: ReturnType<
+    typeof createSubagentRunManager
+  >["markSubagentRestartRecoveryLaunchConsumed"];
+  reserveSubagentRestartRecoveryLaunch: ReturnType<
+    typeof createSubagentRunManager
+  >["reserveSubagentRestartRecoveryLaunch"];
+  resetSubagentRestartRecoveryLaunchAttempt: ReturnType<
+    typeof createSubagentRunManager
+  >["resetSubagentRestartRecoveryLaunchAttempt"];
   finalizeInterruptedSubagentRun: ReturnType<
     typeof createSubagentRegistryCompletionRuntime
   >["finalizeInterruptedSubagentRun"];
@@ -169,8 +186,13 @@ export function createSubagentRegistrySweeper(params: {
   const recovery = createInterruptedRecoveryCoordinator({
     runs,
     getGatewayRuntime: params.getGatewayRecoveryRuntime,
+    abandonLaunch: params.abandonSubagentRestartRecoveryLaunch,
     replaceRun: params.replaceSubagentRunAfterSteer,
-    reserveCollectorLaunch: params.reserveSwarmCollectorLaunch,
+    markLaunchAttempted: params.markSubagentRestartRecoveryLaunchAttempted,
+    markLaunchAccepted: params.markSubagentRestartRecoveryLaunchAccepted,
+    markLaunchConsumed: params.markSubagentRestartRecoveryLaunchConsumed,
+    reserveLaunch: params.reserveSubagentRestartRecoveryLaunch,
+    resetLaunchAttempt: params.resetSubagentRestartRecoveryLaunchAttempt,
     finalizeRun: params.finalizeInterruptedSubagentRun,
     recoverRow: recoverInterruptedSubagentRow,
     schedule: (delayMs) => schedule({ delayMs }),

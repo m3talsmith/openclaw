@@ -44,8 +44,28 @@ function createHarness(runtime: { current?: GatewayRecoveryRuntime }) {
     sweepPendingLifecycle: vi.fn(),
     completeSubagentRunWithRecovery: vi.fn(),
     getGatewayRecoveryRuntime: () => runtime.current,
+    abandonSubagentRestartRecoveryLaunch: vi.fn(() => true),
     replaceSubagentRunAfterSteer: vi.fn(() => true),
-    reserveSwarmCollectorLaunch: vi.fn(() => true),
+    markSubagentRestartRecoveryLaunchAttempted: vi.fn((params) => ({
+      sessionMarker: params.sessionMarker,
+      idempotencyKey: params.idempotencyKey,
+      lifecycleGeneration: params.lifecycleGeneration,
+      phase: "attempted" as const,
+    })),
+    markSubagentRestartRecoveryLaunchAccepted: vi.fn((params) => ({
+      sessionMarker: params.sessionMarker,
+      idempotencyKey: params.idempotencyKey,
+      phase: "accepted" as const,
+    })),
+    markSubagentRestartRecoveryLaunchConsumed: vi.fn((params) => ({
+      sessionMarker: params.sessionMarker,
+      idempotencyKey: params.idempotencyKey,
+      phase: "consumed" as const,
+    })),
+    reserveSubagentRestartRecoveryLaunch: vi.fn(
+      (params: { idempotencyKey: string }) => params.idempotencyKey,
+    ),
+    resetSubagentRestartRecoveryLaunchAttempt: vi.fn(() => true),
     finalizeInterruptedSubagentRun,
     resumeRequesterSettleWake: vi.fn(),
     startSubagentAnnounceCleanupFlow: vi.fn(() => true),
@@ -122,6 +142,19 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(recoverRow).toHaveBeenCalledTimes(3);
+    expect(finalizeInterruptedSubagentRun).not.toHaveBeenCalled();
+    sweeper.reset();
+  });
+
+  it("never terminalizes deferred accepted-run reconciliation", async () => {
+    const runtime = { current: {} as GatewayRecoveryRuntime };
+    recoverRow.mockResolvedValue({ status: "deferred" });
+    const { finalizeInterruptedSubagentRun, sweeper } = createHarness(runtime);
+
+    await sweeper.sweepOnce();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(recoverRow.mock.calls.length).toBeGreaterThan(4);
     expect(finalizeInterruptedSubagentRun).not.toHaveBeenCalled();
     sweeper.reset();
   });

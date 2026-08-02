@@ -321,34 +321,6 @@ function resumeSubagentRun(runId: string) {
   resumedRuns.add(runId);
 }
 
-function reserveSwarmCollectorLaunch(runId: string, idempotencyKey: string): boolean {
-  const entry =
-    subagentRuns.get(runId) ??
-    [...subagentRuns.values()].find((candidate) => candidate.swarmRunId === runId);
-  if (
-    !entry ||
-    entry.collect !== true ||
-    entry.collectorCompletion ||
-    typeof entry.execution.endedAt === "number"
-  ) {
-    return false;
-  }
-  const previous = {
-    idempotencyKey: entry.swarmLaunchIdempotencyKey,
-    pending: entry.swarmLaunchPending,
-  };
-  entry.swarmLaunchIdempotencyKey = idempotencyKey;
-  entry.swarmLaunchPending = true;
-  try {
-    persistSubagentRunsOrThrow(entry.runId);
-  } catch (error) {
-    entry.swarmLaunchIdempotencyKey = previous.idempotencyKey;
-    entry.swarmLaunchPending = previous.pending;
-    throw error;
-  }
-  return true;
-}
-
 const subagentRestorer = createSubagentRegistryRestorer({
   runs: subagentRuns,
   resumedRuns,
@@ -402,8 +374,19 @@ const subagentSweeper = createSubagentRegistrySweeper({
   sweepPendingLifecycle: (now) => pendingLifecycle.sweepExpired(now),
   completeSubagentRunWithRecovery: completionRuntime.completeSubagentRunWithRecovery,
   getGatewayRecoveryRuntime: () => subagentRegistryDeps.getGatewayRecoveryRuntime(),
+  abandonSubagentRestartRecoveryLaunch: (params) =>
+    subagentRunManager.abandonSubagentRestartRecoveryLaunch(params),
   replaceSubagentRunAfterSteer: (params) => subagentRunManager.replaceSubagentRunAfterSteer(params),
-  reserveSwarmCollectorLaunch,
+  markSubagentRestartRecoveryLaunchAttempted: (params) =>
+    subagentRunManager.markSubagentRestartRecoveryLaunchAttempted(params),
+  markSubagentRestartRecoveryLaunchAccepted: (params) =>
+    subagentRunManager.markSubagentRestartRecoveryLaunchAccepted(params),
+  markSubagentRestartRecoveryLaunchConsumed: (params) =>
+    subagentRunManager.markSubagentRestartRecoveryLaunchConsumed(params),
+  reserveSubagentRestartRecoveryLaunch: (params) =>
+    subagentRunManager.reserveSubagentRestartRecoveryLaunch(params),
+  resetSubagentRestartRecoveryLaunchAttempt: (params) =>
+    subagentRunManager.resetSubagentRestartRecoveryLaunchAttempt(params),
   finalizeInterruptedSubagentRun: completionRuntime.finalizeInterruptedSubagentRun,
   resumeRequesterSettleWake,
   startSubagentAnnounceCleanupFlow,

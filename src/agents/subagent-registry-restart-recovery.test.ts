@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GatewayRecoveryRuntime } from "../gateway/server-instance-runtime.types.js";
 import {
-  createInterruptedRecoveryCoordinator,
-  recoverInterruptedSubagentRow,
-} from "./subagent-registry-restart-recovery.js";
+  consumeSessionWorkAdmissionHandoff,
+  type SessionWorkAdmissionLease,
+} from "../sessions/session-lifecycle-admission.js";
+import { recoverInterruptedSubagentRow } from "./subagent-registry-restart-recovery.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
   createSubagentRunRecord,
@@ -35,14 +36,57 @@ vi.mock("../gateway/session-transcript-readers.js", () => ({
 }));
 
 const childSessionKey = "agent:main:subagent:restart-child";
-const dispatchAgent = vi.fn(async () => ({ runId: "replacement-run" }));
+function consumeRecoveryAdmission(payload: Record<string, unknown>): SessionWorkAdmissionLease {
+  const lease = consumeSessionWorkAdmissionHandoff({
+    handoffId: String(payload.internalRuntimeHandoffId),
+    scope: "/tmp/subagent-recovery.sqlite",
+    identities: [childSessionKey, String(payload.expectedExistingSessionId)],
+    onInterrupt: () => undefined,
+  });
+  if (!lease) {
+    throw new Error("expected recovery dispatch to consume its session admission handoff");
+  }
+  return lease;
+}
+
+const dispatchAgent = vi.fn(async (payload: Record<string, unknown>, _timeoutMs?: number) => {
+  consumeRecoveryAdmission(payload).release();
+  return {
+    runId: String(payload.idempotencyKey),
+    status: "accepted",
+  };
+});
 const gatewayRuntime: GatewayRecoveryRuntime = {
   dispatchAgent: dispatchAgent as GatewayRecoveryRuntime["dispatchAgent"],
   waitForAgent: vi.fn(),
   sendRecoveryNotice: vi.fn(),
 };
-const replaceRun = vi.fn(() => true);
-const reserveCollectorLaunch = vi.fn(() => true);
+type RecoveryParams = Parameters<typeof recoverInterruptedSubagentRow>[0];
+type ReplaceRunParams = Parameters<RecoveryParams["replaceRun"]>[0];
+const replaceRun = vi.fn<RecoveryParams["replaceRun"]>(() => true);
+const reserveLaunch = vi.fn<RecoveryParams["reserveLaunch"]>((params) => params.idempotencyKey);
+const markLaunchAttempted = vi.fn<RecoveryParams["markLaunchAttempted"]>((params) => ({
+  sessionMarker: params.sessionMarker,
+  idempotencyKey: params.idempotencyKey,
+  phase: "attempted" as const,
+  lifecycleGeneration: params.lifecycleGeneration,
+}));
+const markLaunchConsumed = vi.fn<RecoveryParams["markLaunchConsumed"]>((params) => ({
+  sessionMarker: params.sessionMarker,
+  idempotencyKey: params.idempotencyKey,
+  phase: "consumed" as const,
+}));
+const markLaunchAccepted = vi.fn<RecoveryParams["markLaunchAccepted"]>((params) => {
+  const accepted = {
+    sessionMarker: params.sessionMarker,
+    idempotencyKey: params.idempotencyKey,
+    phase: "accepted" as const,
+  };
+  params.expected.execution.restartRecovery = accepted;
+  return accepted;
+});
+const resetLaunchAttempt = vi.fn<RecoveryParams["resetLaunchAttempt"]>(() => true);
+const abandonLaunch = vi.fn<RecoveryParams["abandonLaunch"]>(() => true);
 const warn = vi.fn();
 
 function run(overrides: Partial<SubagentRunRecordOverrides> = {}): SubagentRunRecord {
@@ -69,8 +113,13 @@ function recover(
     now: Date.now(),
     gatewayRuntime,
     isCurrent: () => true,
+    abandonLaunch,
     replaceRun,
-    reserveCollectorLaunch,
+    markLaunchAccepted,
+    markLaunchAttempted,
+    markLaunchConsumed,
+    reserveLaunch,
+    resetLaunchAttempt,
     warn,
     ...overrides,
   });
@@ -103,9 +152,41 @@ describe("subagent registry restart recovery", () => {
         return next;
       },
     );
-    dispatchAgent.mockResolvedValue({ runId: "replacement-run" });
+    dispatchAgent.mockImplementation(async (payload) => {
+      consumeRecoveryAdmission(payload).release();
+      return {
+        runId: String(payload.idempotencyKey),
+        status: "accepted",
+      };
+    });
     replaceRun.mockReturnValue(true);
-    reserveCollectorLaunch.mockReturnValue(true);
+    reserveLaunch.mockImplementation((params: { idempotencyKey: string }) => params.idempotencyKey);
+    markLaunchAttempted.mockImplementation(
+      (params: { idempotencyKey: string; lifecycleGeneration: string; sessionMarker: string }) => ({
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "attempted" as const,
+        lifecycleGeneration: params.lifecycleGeneration,
+      }),
+    );
+    markLaunchConsumed.mockImplementation(
+      (params: { idempotencyKey: string; sessionMarker: string }) => ({
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "consumed" as const,
+      }),
+    );
+    markLaunchAccepted.mockImplementation((params) => {
+      const accepted = {
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "accepted" as const,
+      };
+      params.expected.execution.restartRecovery = accepted;
+      return accepted;
+    });
+    resetLaunchAttempt.mockReturnValue(true);
+    abandonLaunch.mockReturnValue(true);
     mocks.readSessionMessages.mockResolvedValue([]);
   });
 
@@ -121,6 +202,8 @@ describe("subagent registry restart recovery", () => {
     expect(dispatchAgent).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionKey: childSessionKey,
+        expectedExistingSessionId: "session-id",
+        internalRuntimeHandoffId: expect.any(String),
         lane: "subagent",
         deliver: false,
         swarmCollector: true,
@@ -129,18 +212,23 @@ describe("subagent registry restart recovery", () => {
         suppressPromptPersistence: true,
         message: expect.stringMatching(/latest user direction[\s\S]*already applied/),
       }),
-      10_000,
     );
-    expect(reserveCollectorLaunch).toHaveBeenCalledWith("original-run", expect.any(String));
+    expect(reserveLaunch).toHaveBeenCalledWith({
+      runId: "original-run",
+      expected: entry,
+      sessionMarker: expect.any(String),
+      idempotencyKey: expect.stringMatching(/^subagent-recovery:[a-f0-9]{64}$/),
+    });
     expect(replaceRun).toHaveBeenCalledWith(
       expect.objectContaining({
         previousRunId: "original-run",
-        nextRunId: "replacement-run",
+        nextRunId: expect.stringMatching(/^subagent-recovery:[a-f0-9]{64}$/),
         expected: entry,
         task: "finish the restart-safe task",
-        restartRecoverySessionMarker: expect.any(String),
+        requirePersistence: true,
       }),
     );
+    expect(replaceRun.mock.calls[0]?.[0]).not.toHaveProperty("restartRecovery");
     expect(mocks.entries[childSessionKey]).toMatchObject({
       abortedLastRun: false,
       subagentRecovery: {
@@ -242,65 +330,336 @@ describe("subagent registry restart recovery", () => {
     expect(mocks.entries[childSessionKey]!.abortedLastRun).toBe(true);
   });
 
-  it("treats accepted dispatch as authoritative across remap and patch failures", async () => {
-    replaceRun.mockReturnValue(false);
-    mocks.patchSessionEntry.mockRejectedValueOnce(new Error("store unavailable"));
+  it("waits for the definitive in-process response without a caller timeout", async () => {
     const entry = run();
-    const marker = `session-id:${String(mocks.entries[childSessionKey]!.updatedAt)}`;
+    let resolveDispatch!: () => void;
+    dispatchAgent.mockImplementationOnce(async (payload, timeoutMs) => {
+      expect(timeoutMs).toBeUndefined();
+      const admission = consumeRecoveryAdmission(payload);
+      await new Promise<void>((resolve) => {
+        resolveDispatch = resolve;
+      });
+      admission.release();
+      return {
+        runId: String(payload.idempotencyKey),
+        status: "accepted",
+      };
+    });
 
+    const pending = recover(entry);
+    await vi.waitFor(() => expect(dispatchAgent).toHaveBeenCalledOnce());
+    let settled = false;
+    void pending.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveDispatch();
+    await expect(pending).resolves.toEqual({ status: "accepted" });
+    expect(abandonLaunch).not.toHaveBeenCalled();
+  });
+
+  it("rolls back a dispatch attempt that never reaches the Gateway handler", async () => {
+    const entry = run();
+    reserveLaunch.mockImplementation((params) => {
+      entry.execution.restartRecovery = {
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "reserved",
+      };
+      return params.idempotencyKey;
+    });
+    markLaunchAttempted.mockImplementation((params) => {
+      const attempted = {
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "attempted" as const,
+        lifecycleGeneration: params.lifecycleGeneration,
+      };
+      entry.execution.restartRecovery = attempted;
+      return attempted;
+    });
+    resetLaunchAttempt.mockImplementation((params) => {
+      entry.execution.restartRecovery = {
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "reserved",
+      };
+      return true;
+    });
+    dispatchAgent.mockRejectedValueOnce(new Error("Gateway runtime is closed"));
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "retry",
+      error: "Gateway runtime is closed",
+    });
+    expect(entry.execution.restartRecovery?.phase).toBe("reserved");
+
+    dispatchAgent.mockImplementationOnce(async (payload) => {
+      consumeRecoveryAdmission(payload).release();
+      return {
+        runId: String(payload.idempotencyKey),
+        status: "accepted",
+      };
+    });
     await expect(recover(entry)).resolves.toEqual({ status: "accepted" });
-    expect(entry.execution.restartRecoverySessionMarker).toBe(marker);
-    await expect(recover(entry)).resolves.toEqual({ status: "handled" });
+    expect(dispatchAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("never dispatches unless the exact source-row reservation persists", async () => {
+    reserveLaunch.mockImplementationOnce(() => {
+      throw new Error("registry unavailable");
+    });
+
+    await expect(recover(run())).resolves.toEqual({
+      status: "retry",
+      error: "registry unavailable",
+    });
+    expect(dispatchAgent).not.toHaveBeenCalled();
+
+    reserveLaunch.mockReturnValueOnce(undefined);
+    await expect(recover(run())).resolves.toEqual({ status: "handled" });
+    expect(dispatchAgent).not.toHaveBeenCalled();
+  });
+
+  it("derives one stable request identity for repeated ambiguous dispatch failures", async () => {
+    dispatchAgent.mockRejectedValue(new Error("response lost"));
+    const entry = run();
+
+    await expect(recover(entry)).resolves.toMatchObject({ status: "retry" });
+    await expect(recover(entry)).resolves.toMatchObject({ status: "retry" });
+
+    const keys = reserveLaunch.mock.calls.map(
+      ([params]: [{ idempotencyKey: string }]) => params.idempotencyKey,
+    );
+    expect(keys).toHaveLength(2);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("does not dispatch when the session snapshot rotates during transcript recovery", async () => {
+    const entry = run();
+    mocks.readSessionMessages.mockImplementationOnce(async () => {
+      mocks.entries[childSessionKey] = {
+        sessionId: "rotated-session",
+        updatedAt: Date.now() + 1,
+        abortedLastRun: true,
+      };
+      return [];
+    });
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "retry",
+      error: "subagent restart recovery session snapshot changed before dispatch",
+    });
+    expect(reserveLaunch).not.toHaveBeenCalled();
+    expect(dispatchAgent).not.toHaveBeenCalled();
+  });
+
+  it("never overwrites a consumed attempt when the mutable session marker advances", async () => {
+    const entry = run({
+      execution: {
+        status: "interrupted",
+        startedAt: Date.now() - 55_000,
+        restartRecovery: {
+          sessionMarker: "session-id:1",
+          idempotencyKey: "subagent-recovery:consumed",
+          phase: "consumed",
+          lifecycleGeneration: "older-generation",
+        },
+      },
+    });
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "terminal",
+      error: expect.stringContaining("automatic replay was suppressed"),
+    });
+
+    expect(abandonLaunch).toHaveBeenCalledWith({
+      runId: entry.runId,
+      expected: entry,
+      sessionMarker: "session-id:1",
+      idempotencyKey: "subagent-recovery:consumed",
+    });
+    expect(reserveLaunch).not.toHaveBeenCalled();
+    expect(dispatchAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an in-flight response when Gateway did not consume the admission handoff", async () => {
+    const entry = run();
+    dispatchAgent.mockImplementationOnce(async (payload) => ({
+      runId: String(payload.idempotencyKey),
+      status: "in_flight",
+    }));
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "retry",
+      error: "Gateway did not consume the subagent restart recovery admission",
+    });
+
+    expect(resetLaunchAttempt).toHaveBeenCalledWith({
+      runId: entry.runId,
+      expected: entry,
+      sessionMarker: expect.any(String),
+      idempotencyKey: expect.stringMatching(/^subagent-recovery:[a-f0-9]{64}$/),
+    });
+    expect(markLaunchAccepted).not.toHaveBeenCalled();
+    expect(replaceRun).not.toHaveBeenCalled();
+    expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not create a successor when Gateway consumes admission but rejects launch", async () => {
+    const entry = run();
+    dispatchAgent.mockImplementationOnce(async (payload) => {
+      consumeRecoveryAdmission(payload).release();
+      return {
+        runId: String(payload.idempotencyKey),
+        status: "timeout",
+        stopReason: "restart",
+        timeoutPhase: "queue",
+        providerStarted: false,
+      };
+    });
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "terminal",
+      error: expect.stringContaining("Gateway did not accept"),
+    });
+
+    expect(abandonLaunch).toHaveBeenCalledWith({
+      runId: entry.runId,
+      expected: entry,
+      sessionMarker: expect.any(String),
+      idempotencyKey: expect.stringMatching(/^subagent-recovery:[a-f0-9]{64}$/),
+    });
+    expect(markLaunchAccepted).not.toHaveBeenCalled();
+    expect(replaceRun).not.toHaveBeenCalled();
+    expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+  });
+
+  it("keeps accepted source ownership after settlement when durable remap fails", async () => {
+    replaceRun.mockReturnValue(false);
+    const entry = run();
+
+    await expect(recover(entry)).resolves.toEqual({ status: "deferred" });
     expect(dispatchAgent).toHaveBeenCalledOnce();
+    expect(mocks.patchSessionEntry).toHaveBeenCalledOnce();
+    expect(mocks.entries[childSessionKey]!.abortedLastRun).toBe(false);
+    expect(entry.execution.restartRecovery).toMatchObject({
+      idempotencyKey: expect.stringMatching(/^subagent-recovery:[a-f0-9]{64}$/),
+      phase: "accepted",
+    });
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("could not remap"),
       expect.any(Object),
     );
   });
 
-  it("reuses a durable acceptance after the recovery coordinator is recreated", async () => {
-    mocks.patchSessionEntry.mockRejectedValue(new Error("store unavailable"));
+  it("settles a persisted accepted receipt without dispatching another turn", async () => {
     const entry = run();
-    const marker = `session-id:${String(mocks.entries[childSessionKey]!.updatedAt)}`;
-    const firstRuns = new Map([[entry.runId, entry]]);
-    let persistedReplacement: SubagentRunRecord | undefined;
-    const replace: Parameters<typeof createInterruptedRecoveryCoordinator>[0]["replaceRun"] = (
-      params,
-    ) => {
-      const replacement = structuredClone(entry);
+    mocks.patchSessionEntry.mockRejectedValueOnce(new Error("store unavailable"));
+
+    await expect(recover(entry)).resolves.toEqual({
+      status: "deferred",
+    });
+    await expect(recover(entry)).resolves.toEqual({ status: "accepted" });
+
+    expect(dispatchAgent).toHaveBeenCalledOnce();
+    expect(replaceRun).toHaveBeenCalledOnce();
+    expect(replaceRun.mock.calls[0]?.[0]).not.toHaveProperty("restartRecovery");
+    expect(mocks.entries[childSessionKey]).toMatchObject({
+      abortedLastRun: false,
+      subagentRecovery: {
+        automaticAttempts: 1,
+      },
+    });
+  });
+
+  it("keeps a definitive accepted response when the consumed write fails", async () => {
+    const entry = run();
+    markLaunchConsumed.mockImplementationOnce((params) => {
+      params.expected.execution.restartRecovery = {
+        sessionMarker: params.sessionMarker,
+        idempotencyKey: params.idempotencyKey,
+        phase: "consumed",
+      };
+      throw new Error("consumed write failed");
+    });
+
+    await expect(recover(entry)).resolves.toEqual({ status: "accepted" });
+
+    expect(markLaunchAccepted).toHaveBeenCalledOnce();
+    expect(replaceRun).toHaveBeenCalledOnce();
+    expect(entry.execution.restartRecovery).toMatchObject({
+      phase: "accepted",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("intermediate consumed receipt"),
+      expect.objectContaining({ error: expect.any(Error) }),
+    );
+  });
+
+  it("remaps persisted accepted ownership without clearing a newer session marker", async () => {
+    mocks.entries[childSessionKey]!.abortedLastRun = false;
+    const entry = run({
+      execution: {
+        status: "interrupted",
+        startedAt: Date.now() - 55_000,
+        restartRecovery: {
+          sessionMarker: "session-id:1",
+          idempotencyKey: "subagent-recovery:accepted",
+          phase: "accepted",
+        },
+      },
+    });
+
+    await expect(recover(entry)).resolves.toEqual({ status: "accepted" });
+
+    expect(replaceRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        previousRunId: entry.runId,
+        nextRunId: "subagent-recovery:accepted",
+        requirePersistence: true,
+      }),
+    );
+    expect(replaceRun.mock.calls[0]?.[0]).not.toHaveProperty("restartRecovery");
+    expect(dispatchAgent).not.toHaveBeenCalled();
+    expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+    expect(mocks.entries[childSessionKey]!.abortedLastRun).toBe(false);
+  });
+
+  it("retires the accepted receipt so a later restart can dispatch a new recovery", async () => {
+    const entry = run();
+    const replacements: SubagentRunRecord[] = [];
+    replaceRun.mockImplementation((params: ReplaceRunParams) => {
+      const replacement = structuredClone(params.expected ?? entry);
       replacement.runId = params.nextRunId;
       replacement.execution = {
         status: "running",
         startedAt: Date.now(),
-        restartRecoverySessionMarker: params.restartRecoverySessionMarker,
       };
-      firstRuns.delete(params.previousRunId);
-      firstRuns.set(params.nextRunId, replacement);
-      persistedReplacement = structuredClone(replacement);
+      replacements.push(replacement);
       return true;
-    };
-    const coordinatorParams = {
-      replaceRun: replace,
-      reserveCollectorLaunch,
-      warn,
-      getGatewayRuntime: () => gatewayRuntime,
-      finalizeRun: vi.fn(async () => 1),
-      schedule: vi.fn(),
-    };
-    const first = createInterruptedRecoveryCoordinator({ ...coordinatorParams, runs: firstRuns });
-
-    await expect(first.recover(entry.runId, entry, Date.now())).resolves.toBe(true);
-    expect(persistedReplacement?.execution.restartRecoverySessionMarker).toBe(marker);
-
-    const restored = structuredClone(persistedReplacement!);
-    const restartedRuns = new Map([[restored.runId, restored]]);
-    const second = createInterruptedRecoveryCoordinator({
-      ...coordinatorParams,
-      runs: restartedRuns,
     });
-    await expect(second.recover(restored.runId, restored, Date.now())).resolves.toBe(true);
 
-    expect(dispatchAgent).toHaveBeenCalledOnce();
+    await expect(recover(entry)).resolves.toEqual({ status: "accepted" });
+    const firstSuccessor = replacements[0]!;
+    const firstRecoveryRunId = firstSuccessor.runId;
+    expect(firstSuccessor.execution.restartRecovery).toBeUndefined();
+    expect(replaceRun.mock.calls[0]?.[0]).not.toHaveProperty("restartRecovery");
+
+    mocks.entries[childSessionKey] = {
+      sessionId: "session-id-2",
+      updatedAt: Date.now() + 1_000,
+      abortedLastRun: true,
+    };
+    await expect(recover(firstSuccessor)).resolves.toEqual({ status: "accepted" });
+
+    expect(dispatchAgent).toHaveBeenCalledTimes(2);
+    expect(replacements).toHaveLength(2);
+    expect(replacements[1]!.runId).not.toBe(firstRecoveryRunId);
+    expect(replacements[1]!.execution.restartRecovery).toBeUndefined();
+    expect(replaceRun.mock.calls[1]?.[0]).not.toHaveProperty("restartRecovery");
   });
 
   it("tombstones a rapid third accepted recovery", async () => {

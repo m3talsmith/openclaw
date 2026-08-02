@@ -55,10 +55,17 @@ export type PendingFinalDeliveryPayload = {
   wakeOnDescendantSettle?: boolean;
 };
 
+export type SubagentRestartRecoveryReceipt = {
+  sessionMarker: string;
+  idempotencyKey: string;
+  phase: "reserved" | "attempted" | "consumed" | "accepted" | "abandoned";
+  lifecycleGeneration?: string;
+};
+
 type SubagentExecutionState = {
   status: "queued" | "running" | "interrupted" | "terminal";
-  /** Abort snapshot whose replacement dispatch this execution already accepted. */
-  restartRecoverySessionMarker?: string;
+  /** Durable dispatch receipt for one interrupted-session snapshot. */
+  restartRecovery?: SubagentRestartRecoveryReceipt;
   acceptedAt?: number;
   startedAt?: number;
   endedAt?: number;

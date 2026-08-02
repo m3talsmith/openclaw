@@ -3,8 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setRuntimeConfigSnapshot } from "../config/config.js";
+import { getRuntimeConfig, setRuntimeConfigSnapshot } from "../config/config.js";
+import { resolveAgentIdFromSessionKey, resolveStorePath } from "../config/sessions.js";
 import type { GatewayRecoveryRuntime } from "../gateway/server-instance-runtime.types.js";
+import { rotateAgentEventLifecycleGeneration } from "../infra/agent-events.js";
+import {
+  consumeSessionWorkAdmissionHandoff,
+  type SessionWorkAdmissionLease,
+} from "../sessions/session-lifecycle-admission.js";
 import { createRunningTaskRun } from "../tasks/detached-task-runtime.js";
 import { findTaskByRunId } from "../tasks/task-registry.js";
 import {
@@ -13,15 +19,19 @@ import {
 } from "../tasks/task-runtime.test-helpers.js";
 import { captureEnv } from "../test-utils/env.js";
 import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
+import { subagentRuns } from "./subagent-registry-memory.js";
+import { persistSubagentRunsToDiskOrThrow } from "./subagent-registry-state.js";
 import {
   createCanonicalSubagentRunFixture,
   createSubagentRegistryTestDeps,
   readSubagentSessionStore,
   writeSubagentSessionEntry,
 } from "./subagent-registry.persistence.test-support.js";
+import { loadSubagentRegistryFromSqlite } from "./subagent-registry.store.sqlite.js";
 import {
   addSubagentRunForTests,
   getSubagentRunByChildSessionKey,
+  initSubagentRegistry,
   listSubagentRunsForRequester,
   resetSubagentRegistryForTests,
   testing,
@@ -32,9 +42,32 @@ import {
   type SubagentRunRecordOverrides,
 } from "./subagent-test-fixtures.test-helpers.js";
 
-const dispatchAgent = vi.fn(async (_payload: Record<string, unknown>, _timeoutMs?: number) => ({
-  runId: "resumed-run-id",
-}));
+function consumeRecoveryAdmission(payload: Record<string, unknown>): SessionWorkAdmissionLease {
+  const sessionKey = String(payload.sessionKey);
+  const sessionId = String(payload.expectedExistingSessionId);
+  const agentId = resolveAgentIdFromSessionKey(sessionKey);
+  const scope = resolveStorePath(getRuntimeConfig().session?.store, { agentId });
+  const admission = consumeSessionWorkAdmissionHandoff({
+    handoffId: String(payload.internalRuntimeHandoffId),
+    scope,
+    identities: [sessionKey, sessionId],
+    onInterrupt: () => undefined,
+  });
+  if (!admission) {
+    throw new Error("expected recovery dispatch to consume its session admission handoff");
+  }
+  return admission;
+}
+
+async function acceptRecoveryDispatch(payload: Record<string, unknown>) {
+  consumeRecoveryAdmission(payload).release();
+  return {
+    runId: String(payload.idempotencyKey),
+    status: "accepted",
+  };
+}
+
+const dispatchAgent = vi.fn(acceptRecoveryDispatch);
 const gatewayRuntime: GatewayRecoveryRuntime = {
   dispatchAgent: dispatchAgent as GatewayRecoveryRuntime["dispatchAgent"],
   waitForAgent: vi.fn(),
@@ -82,7 +115,7 @@ describe("subagent orphan recovery — faithful restart path", () => {
       onAgentEvent: vi.fn(() => () => undefined),
     });
     dispatchAgent.mockReset();
-    dispatchAgent.mockResolvedValue({ runId: "resumed-run-id" });
+    dispatchAgent.mockImplementation(acceptRecoveryDispatch);
   });
 
   afterEach(async () => {
@@ -188,7 +221,252 @@ describe("subagent orphan recovery — faithful restart path", () => {
       lane: "subagent",
       deliver: false,
     });
-    expect(getSubagentRunByChildSessionKey(childSessionKey)?.runId).toBe("resumed-run-id");
+    expect(getSubagentRunByChildSessionKey(childSessionKey)?.runId).toBe(
+      String(dispatchAgent.mock.calls[0]?.[0].idempotencyKey),
+    );
+  });
+
+  it("preserves an accepted response across a consumed-receipt write failure", async () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:consumed-write-failure";
+    const runId = "run-consumed-write-failure";
+    await writeSubagentSessionEntry({
+      stateDir: tempStateDir!,
+      agentId: "main",
+      sessionKey: childSessionKey,
+      sessionId: "sess-consumed-write-failure",
+      updatedAt: now,
+      abortedLastRun: true,
+      defaultSessionId: "sess-consumed-write-failure",
+    });
+    addSubagentRunForTests(
+      makeRunRecord({
+        runId,
+        childSessionKey,
+        createdAt: now - 60_000,
+        startedAt: now - 55_000,
+      }),
+    );
+
+    let strictWriteCount = 0;
+    testing.setDepsForTest({
+      ...createSubagentRegistryTestDeps(),
+      getGatewayRecoveryRuntime: () => gatewayRuntime,
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      onAgentEvent: vi.fn(() => () => undefined),
+      persistSubagentRunsToDiskOrThrow: (runs, changedRunIds) => {
+        strictWriteCount += 1;
+        if (strictWriteCount === 3) {
+          throw new Error("consumed receipt write failed");
+        }
+        persistSubagentRunsToDiskOrThrow(runs, changedRunIds);
+      },
+    });
+
+    await testing.sweepOnceForTests();
+
+    expect(dispatchAgent).toHaveBeenCalledOnce();
+    const acceptedKey = String(dispatchAgent.mock.calls[0]?.[0].idempotencyKey);
+    const successor = getSubagentRunByChildSessionKey(childSessionKey);
+    expect(successor?.runId).toBe(acceptedKey);
+    expect(successor?.execution.restartRecovery).toBeUndefined();
+    expect(
+      loadSubagentRegistryFromSqlite().get(acceptedKey)?.execution.restartRecovery,
+    ).toBeUndefined();
+  });
+
+  it("never replays an attempted recovery after acceptance response loss and cold restore", async () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:lost-acceptance";
+    const runId = "run-lost-acceptance";
+    const storePath = await writeSubagentSessionEntry({
+      stateDir: tempStateDir!,
+      agentId: "main",
+      sessionKey: childSessionKey,
+      sessionId: "sess-lost-acceptance",
+      updatedAt: now,
+      abortedLastRun: true,
+      defaultSessionId: "sess-lost-acceptance",
+    });
+    const record = makeRunRecord({
+      runId,
+      childSessionKey,
+      generation: 1,
+      collect: true,
+      outputSchema: { type: "object" },
+      createdAt: now - 60_000,
+      startedAt: now - 55_000,
+    });
+    addSubagentRunForTests(record);
+
+    let acceptedKey = "";
+    let acceptedAdmission: SessionWorkAdmissionLease | undefined;
+    dispatchAgent.mockImplementationOnce(async (payload) => {
+      acceptedKey = String(payload.idempotencyKey);
+      acceptedAdmission = consumeSessionWorkAdmissionHandoff({
+        handoffId: String(payload.internalRuntimeHandoffId),
+        scope: storePath,
+        identities: [childSessionKey, "sess-lost-acceptance"],
+        onInterrupt: () => undefined,
+      });
+      expect(acceptedAdmission).toBeDefined();
+      expect(loadSubagentRegistryFromSqlite().get(runId)).toMatchObject({
+        execution: {
+          restartRecovery: {
+            sessionMarker: `sess-lost-acceptance:${now}`,
+            idempotencyKey: acceptedKey,
+            phase: "attempted",
+          },
+        },
+        swarmLaunchIdempotencyKey: acceptedKey,
+        swarmLaunchPending: true,
+      });
+      throw new Error("response lost after gateway acceptance");
+    });
+
+    await testing.sweepOnceForTests();
+
+    expect(acceptedKey).toMatch(/^subagent-recovery:[a-f0-9]{64}$/);
+    let admissionReleased = false;
+    void acceptedAdmission?.released.then(() => {
+      admissionReleased = true;
+    });
+    await Promise.resolve();
+    expect(admissionReleased).toBe(false);
+    expect(loadSubagentRegistryFromSqlite().get(runId)).toMatchObject({
+      execution: {
+        restartRecovery: {
+          sessionMarker: `sess-lost-acceptance:${now}`,
+          idempotencyKey: acceptedKey,
+          phase: "consumed",
+        },
+      },
+    });
+
+    resetSubagentRegistryForTests({ persist: false });
+    acceptedAdmission?.release();
+    rotateAgentEventLifecycleGeneration();
+    initSubagentRegistry();
+    const restored = subagentRuns.get(runId);
+    expect(restored?.execution.restartRecovery).toMatchObject({
+      sessionMarker: `sess-lost-acceptance:${now}`,
+      idempotencyKey: acceptedKey,
+      phase: "consumed",
+    });
+
+    await testing.sweepOnceForTests();
+
+    const dispatchedKeys = dispatchAgent.mock.calls.map(([payload]) =>
+      String(payload.idempotencyKey),
+    );
+    expect(dispatchedKeys).toEqual([acceptedKey]);
+    expect(subagentRuns.get(runId)).toMatchObject({
+      execution: {
+        status: "terminal",
+        outcome: {
+          status: "error",
+          error: expect.stringContaining("automatic replay was suppressed"),
+        },
+        restartRecovery: {
+          idempotencyKey: acceptedKey,
+          phase: "abandoned",
+        },
+      },
+    });
+    expect((await readSubagentSessionStore(storePath))[childSessionKey]).toMatchObject({
+      status: "failed",
+    });
+  });
+
+  it("settles the accepted source before durable remap and clears the successor receipt", async () => {
+    const now = Date.now();
+    const childSessionKey = "agent:main:subagent:successor-write-failure";
+    const runId = "run-successor-write-failure";
+    const storePath = await writeSubagentSessionEntry({
+      stateDir: tempStateDir!,
+      agentId: "main",
+      sessionKey: childSessionKey,
+      sessionId: "sess-successor-write-failure",
+      updatedAt: now,
+      abortedLastRun: true,
+      defaultSessionId: "sess-successor-write-failure",
+    });
+    const record = makeRunRecord({
+      runId,
+      childSessionKey,
+      generation: 1,
+      createdAt: now - 60_000,
+      startedAt: now - 55_000,
+    });
+    addSubagentRunForTests(record);
+
+    let strictWriteCount = 0;
+    testing.setDepsForTest({
+      ...createSubagentRegistryTestDeps(),
+      getGatewayRecoveryRuntime: () => gatewayRuntime,
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      onAgentEvent: vi.fn(() => () => undefined),
+      persistSubagentRunsToDiskOrThrow: (runs, changedRunIds) => {
+        strictWriteCount += 1;
+        if (strictWriteCount === 5) {
+          throw new Error("successor write failed");
+        }
+        persistSubagentRunsToDiskOrThrow(runs, changedRunIds);
+      },
+    });
+    dispatchAgent.mockImplementationOnce(acceptRecoveryDispatch);
+
+    await testing.sweepOnceForTests();
+
+    const acceptedKey = String(dispatchAgent.mock.calls[0]?.[0].idempotencyKey);
+    expect(subagentRuns.get(runId)).toMatchObject({
+      execution: {
+        restartRecovery: {
+          idempotencyKey: acceptedKey,
+          phase: "accepted",
+        },
+      },
+    });
+    expect(loadSubagentRegistryFromSqlite().get(runId)).toMatchObject({
+      execution: {
+        restartRecovery: {
+          idempotencyKey: acceptedKey,
+          phase: "accepted",
+        },
+      },
+    });
+    expect(subagentRuns.has(acceptedKey)).toBe(false);
+    expect(loadSubagentRegistryFromSqlite().has(acceptedKey)).toBe(false);
+    expect((await readSubagentSessionStore(storePath))[childSessionKey]).toMatchObject({
+      abortedLastRun: false,
+    });
+
+    resetSubagentRegistryForTests({ persist: false });
+    testing.setDepsForTest({
+      ...createSubagentRegistryTestDeps(),
+      getGatewayRecoveryRuntime: () => gatewayRuntime,
+      runSubagentAnnounceFlow: vi.fn(async () => true),
+      onAgentEvent: vi.fn(() => () => undefined),
+    });
+    initSubagentRegistry();
+    expect(subagentRuns.get(runId)?.execution.restartRecovery).toMatchObject({
+      idempotencyKey: acceptedKey,
+      phase: "accepted",
+    });
+    await testing.sweepOnceForTests();
+
+    expect(dispatchAgent.mock.calls.map(([payload]) => String(payload.idempotencyKey))).toEqual([
+      acceptedKey,
+    ]);
+    const successor = getSubagentRunByChildSessionKey(childSessionKey);
+    expect(successor?.runId).toBe(acceptedKey);
+    expect(successor?.execution.restartRecovery).toBeUndefined();
+    expect(
+      loadSubagentRegistryFromSqlite().get(acceptedKey)?.execution.restartRecovery,
+    ).toBeUndefined();
+    expect((await readSubagentSessionStore(storePath))[childSessionKey]).toMatchObject({
+      abortedLastRun: false,
+    });
   });
 
   it("finalizes only a stale predecessor when a fresh generation shares its child session", async () => {
@@ -241,12 +519,11 @@ describe("subagent orphan recovery — faithful restart path", () => {
     await testing.sweepOnceForTests();
 
     const runs = listSubagentRunsForRequester("agent:main:main");
+    const recoveredRunId = String(dispatchAgent.mock.calls[0]?.[0].idempotencyKey);
     expect(dispatchAgent).toHaveBeenCalledOnce();
     expect(runs.some((entry) => entry.runId === staleRecord.runId)).toBe(false);
-    expect(runs).toContainEqual(expect.objectContaining({ runId: "resumed-run-id" }));
-    expect(
-      runs.find((entry) => entry.runId === "resumed-run-id")?.execution.endedAt,
-    ).toBeUndefined();
+    expect(runs).toContainEqual(expect.objectContaining({ runId: recoveredRunId }));
+    expect(runs.find((entry) => entry.runId === recoveredRunId)?.execution.endedAt).toBeUndefined();
     expect(findTaskByRunId(staleRecord.runId)).toMatchObject({ status: "failed" });
     expect(findTaskByRunId(freshRecord.runId)).toMatchObject({ status: "running" });
   });
