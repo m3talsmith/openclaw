@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   GatewayRequestError,
   type GatewayBrowserClient,
@@ -7,6 +7,7 @@ import {
   type GatewayHelloOk,
 } from "../../api/gateway.ts";
 import type { SessionsListResult } from "../../api/types.ts";
+import { createStorageMock } from "../../test-helpers/storage.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import { createSessionCapability, reconcileSessionRunTerminal } from "./index.ts";
 
@@ -30,7 +31,11 @@ function deferred<T>() {
   return { promise, reject, resolve };
 }
 
-function createGatewayHarness(client: GatewayBrowserClient, featureMethods?: string[]) {
+function createGatewayHarness(
+  client: GatewayBrowserClient,
+  featureMethods?: string[],
+  scopes?: string[],
+) {
   let snapshot: {
     client: GatewayBrowserClient | null;
     phase: "connected" | "reconnecting";
@@ -45,7 +50,10 @@ function createGatewayHarness(client: GatewayBrowserClient, featureMethods?: str
     hello:
       featureMethods === undefined
         ? null
-        : ({ features: { methods: featureMethods } } as GatewayHelloOk),
+        : ({
+            ...(scopes ? { auth: { role: "operator", scopes } } : {}),
+            features: { methods: featureMethods },
+          } as GatewayHelloOk),
   };
   const listeners = new Set<(next: typeof snapshot) => void>();
   const eventListeners = new Set<(event: GatewayEventFrame) => void>();
@@ -80,6 +88,10 @@ function createGatewayHarness(client: GatewayBrowserClient, featureMethods?: str
     },
   };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function sessionChangedEvent(key: string): GatewayEventFrame {
   return {
@@ -167,6 +179,61 @@ describe("createSessionCapability", () => {
     await sessions.groupsLoad();
 
     expect(request).toHaveBeenCalledOnce();
+    sessions.dispose();
+  });
+
+  it("does not migrate legacy browser groups without operator.write", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    localStorage.setItem("openclaw:sessions:custom-groups", JSON.stringify(["Research"]));
+    const request = vi.fn(async (method: string) => {
+      if (method === "sessions.groups.list") {
+        return { groups: [] };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const { gateway } = createGatewayHarness(
+      client,
+      ["sessions.groups.list", "sessions.groups.put"],
+      ["operator.read"],
+    );
+    const sessions = createSessionCapability(gateway);
+
+    await sessions.groupsLoad();
+
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith("sessions.groups.list", {});
+    expect(localStorage.getItem("openclaw:sessions:custom-groups")).toBe(
+      JSON.stringify(["Research"]),
+    );
+    sessions.dispose();
+  });
+
+  it("migrates legacy browser groups with operator.write", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    localStorage.setItem("openclaw:sessions:custom-groups", JSON.stringify(["Research"]));
+    const request = vi.fn(async (method: string) => {
+      if (method === "sessions.groups.list") {
+        return { groups: [] };
+      }
+      if (method === "sessions.groups.put") {
+        return { groups: [{ name: "Research" }] };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    const { gateway } = createGatewayHarness(
+      client,
+      ["sessions.groups.list", "sessions.groups.put"],
+      ["operator.write"],
+    );
+    const sessions = createSessionCapability(gateway);
+
+    await sessions.groupsLoad();
+
+    expect(request).toHaveBeenCalledWith("sessions.groups.put", { names: ["Research"] });
+    expect(sessions.state.groups).toEqual(["Research"]);
+    expect(localStorage.getItem("openclaw:sessions:custom-groups")).toBeNull();
     sessions.dispose();
   });
 
