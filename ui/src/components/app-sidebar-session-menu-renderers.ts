@@ -19,13 +19,13 @@ import {
   trackDropdownKeyboardDismissal,
 } from "./web-awesome.ts";
 
-type SidebarSessionGroupMenuAction = "rename-group" | "new-group" | "delete-group";
+export type SidebarSessionGroupMenuAction = "rename-group" | "new-group" | "delete-group";
 
 export function renderSidebarSessionGroupMenu(params: {
   menu: SidebarSessionGroupMenuState | null;
   trigger: HTMLElement | null;
   connected: boolean;
-  disabledReason?: string;
+  actionDisabledReasons?: Partial<Record<SidebarSessionGroupMenuAction, string>>;
   onAction: (action: SidebarSessionGroupMenuAction, group: string) => void;
   onClose: (restoreFocus: boolean) => void;
 }) {
@@ -47,8 +47,8 @@ export function renderSidebarSessionGroupMenu(params: {
             event.preventDefault();
             const value = event.detail.item.value;
             if (
-              !params.disabledReason &&
-              (value === "rename-group" || value === "new-group" || value === "delete-group")
+              (value === "rename-group" || value === "new-group" || value === "delete-group") &&
+              !params.actionDisabledReasons?.[value]
             ) {
               params.onAction(value, menu.group);
             }
@@ -69,8 +69,9 @@ export function renderSidebarSessionGroupMenu(params: {
           <wa-dropdown-item
             class="session-menu__item"
             value="rename-group"
-            ?disabled=${!params.connected || Boolean(params.disabledReason)}
-            title=${params.disabledReason ?? nothing}
+            ?disabled=${!params.connected ||
+            Boolean(params.actionDisabledReasons?.["rename-group"])}
+            title=${params.actionDisabledReasons?.["rename-group"] ?? nothing}
           >
             <span slot="icon" class="session-menu__icon" aria-hidden="true">${icons.edit}</span>
             <span class="session-menu__text">${t("sessionsView.renameGroupMenu")}</span>
@@ -78,8 +79,8 @@ export function renderSidebarSessionGroupMenu(params: {
           <wa-dropdown-item
             class="session-menu__item"
             value="new-group"
-            ?disabled=${!params.connected || Boolean(params.disabledReason)}
-            title=${params.disabledReason ?? nothing}
+            ?disabled=${!params.connected || Boolean(params.actionDisabledReasons?.["new-group"])}
+            title=${params.actionDisabledReasons?.["new-group"] ?? nothing}
           >
             <span slot="icon" class="session-menu__icon" aria-hidden="true">${icons.folder}</span>
             <span class="session-menu__text">${t("sessionsView.newGroup")}</span>
@@ -89,8 +90,9 @@ export function renderSidebarSessionGroupMenu(params: {
             class="session-menu__item session-menu__item--destructive"
             value="delete-group"
             variant="danger"
-            ?disabled=${!params.connected || Boolean(params.disabledReason)}
-            title=${params.disabledReason ?? nothing}
+            ?disabled=${!params.connected ||
+            Boolean(params.actionDisabledReasons?.["delete-group"])}
+            title=${params.actionDisabledReasons?.["delete-group"] ?? nothing}
           >
             <span slot="icon" class="session-menu__icon" aria-hidden="true">${icons.trash}</span>
             <span class="session-menu__text">${t("sessionsView.deleteGroupMenu")}</span>

@@ -331,15 +331,29 @@ export function renderSidebarSessionMenuForController(controller: SidebarMenusCo
 export function renderSidebarSessionGroupMenuForController(controller: SidebarMenusController) {
   const { host } = controller;
   const menu = controller.sessionGroupMenu;
-  const groupAccess = readSessionMethodAccess(host.sessionDataContext?.gateway.snapshot, {
-    method: "sessions.groups.put",
-    requiredScope: "operator.write",
-  });
+  const groupActionAccess = {
+    "rename-group": readSessionMethodAccess(host.sessionDataContext?.gateway.snapshot, {
+      method: "sessions.groups.rename",
+      requiredScope: "operator.write",
+    }),
+    "new-group": readSessionMethodAccess(host.sessionDataContext?.gateway.snapshot, {
+      method: "sessions.groups.put",
+      requiredScope: "operator.write",
+    }),
+    "delete-group": readSessionMethodAccess(host.sessionDataContext?.gateway.snapshot, {
+      method: "sessions.groups.delete",
+      requiredScope: "operator.write",
+    }),
+  } as const;
   return renderSidebarSessionGroupMenu({
     menu,
     trigger: controller.sessionGroupMenuTrigger,
     connected: host.connected,
-    disabledReason: groupAccess.allowed ? undefined : groupAccess.reason,
+    actionDisabledReasons: Object.fromEntries(
+      Object.entries(groupActionAccess).flatMap(([action, access]) =>
+        access.allowed ? [] : [[action, access.reason]],
+      ),
+    ),
     onAction: (action, group) => {
       controller.closeSessionGroupMenu({ restoreFocus: true });
       switch (action) {

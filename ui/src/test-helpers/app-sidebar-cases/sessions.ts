@@ -749,4 +749,44 @@ describe("AppSidebar session mutation feedback", () => {
       confirmSpy.mockRestore();
     }
   });
+
+  it("keeps preserved worktrees when the operator lacks admin access", async () => {
+    const request = vi.fn(() => Promise.resolve({}));
+    const { gateway, harness, sidebar } = await mountMutationHarness({
+      request,
+    } as unknown as GatewayBrowserClient);
+    const result = harness.sessions.state.result;
+    const archived = result?.sessions.find((row) => row.key === "agent:main:a");
+    if (!result || !archived) {
+      throw new Error("expected archived session fixture");
+    }
+    archived.archived = true;
+    Object.assign(sidebar, { sessionsStatusFilter: "archived" });
+    harness.publishList({ result });
+    gateway.publish({
+      hello: {
+        auth: { role: "operator", scopes: ["operator.write"] },
+        features: { methods: ["sessions.delete", "worktrees.remove"] },
+      } as ApplicationGatewaySnapshot["hello"],
+    });
+    await sidebar.updateComplete;
+    harness.deleteSession.mockResolvedValueOnce({
+      deleted: true,
+      worktreePreserved: { id: "wt-1", branch: "feature", path: "/tmp/worktree" },
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    try {
+      const menu = await openSessionMenu(sidebar, archived.key);
+      menu.querySelector<HTMLButtonElement>('[data-shortcut="d"]')?.click();
+      await waitForFast(() => expect(harness.deleteSession).toHaveBeenCalledOnce());
+      await waitForFast(() => expect(alertSpy).toHaveBeenCalledOnce());
+
+      expect(confirmSpy).toHaveBeenCalledOnce();
+      expect(request).not.toHaveBeenCalledWith("worktrees.remove", expect.anything());
+    } finally {
+      confirmSpy.mockRestore();
+      alertSpy.mockRestore();
+    }
+  });
 });

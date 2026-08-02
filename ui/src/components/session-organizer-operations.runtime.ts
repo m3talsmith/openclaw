@@ -661,7 +661,21 @@ export async function deleteSession(
     // Dirty/unpushed checkouts survive deletion; offer explicit removal.
     if (outcome.worktreePreserved) {
       const preserved = outcome.worktreePreserved;
-      if (
+      const removeAccess = readSessionMethodAccess(scope.gateway.snapshot, {
+        method: "worktrees.remove",
+        requiredScope: "operator.admin",
+      });
+      if (!removeAccess.allowed) {
+        window.alert(
+          t("sessionsView.deletePreservedWorktrees", {
+            count: "1",
+            branches: preserved.branch,
+          }),
+        );
+        if (!host.sessionData.isSessionMutationScopeCurrent(scope)) {
+          return;
+        }
+      } else if (
         window.confirm(
           t("sessionsView.deletePreservedWorktreeConfirm", { branch: preserved.branch }),
         )
