@@ -12,6 +12,7 @@ import { selectApplicationSession } from "../../app/agent-selection.ts";
 import { clampText } from "../../lib/format.ts";
 import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
 import { resolveSessionDisplayName } from "../../lib/session-display.ts";
+import { readSessionMethodAccess } from "../../lib/session-method-access.ts";
 import {
   scopedSessionPullRequestKey,
   SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
@@ -336,6 +337,16 @@ export abstract class ChatPaneSession extends ChatPaneSharing {
   protected async restoreArchivedSession(sessionKey: string) {
     const scope = this.captureConnectionScope();
     if (!scope || scope.state.sessionKey !== sessionKey) {
+      return;
+    }
+    const access = readSessionMethodAccess(scope.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key: sessionKey, archived: false },
+    });
+    if (!access.allowed) {
+      scope.state.lastError = access.reason;
+      scope.state.chatError = access.reason;
+      scope.state.requestUpdate?.();
       return;
     }
     const agentId = parseAgentSessionKey(sessionKey)?.agentId ?? resolveChatAgentId(scope.state);

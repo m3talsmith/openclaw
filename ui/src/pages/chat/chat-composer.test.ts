@@ -221,6 +221,29 @@ describe("renderChatComposer controls", () => {
     expect(onAbort).toHaveBeenCalledOnce();
   });
 
+  it("disables an archived-session action with its mutation reason", () => {
+    const onAction = vi.fn();
+    const reason = "Operator write access is required.";
+    const { container } = renderComposer({
+      canSend: false,
+      disabledBanner: {
+        kind: "composer-replacement",
+        text: "This session is archived. Unarchive it to continue the conversation.",
+        actionLabel: "Unarchive",
+        disabledReason: reason,
+        onAction,
+      },
+    });
+
+    const action = container.querySelector<HTMLButtonElement>(
+      ".agent-chat__disabled-banner button",
+    );
+    expect(action?.disabled).toBe(true);
+    expect(action?.title).toBe(reason);
+    action?.click();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it("keeps the disabled composer mounted for a catalog read-only state", () => {
     const { container } = renderComposer({
       canSend: false,

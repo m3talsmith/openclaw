@@ -36,6 +36,7 @@ export type TestChatPane = HTMLElement & {
   connectedCallback: () => void;
   connectionGeneration: number;
   createSession: () => Promise<boolean>;
+  restoreArchivedSession: (sessionKey: string) => Promise<void>;
   disconnectedCallback: () => void;
   acceptTaskSuggestion: (suggestion: TaskSuggestion) => Promise<void>;
   handleDocumentKeydown: (event: KeyboardEvent) => void;

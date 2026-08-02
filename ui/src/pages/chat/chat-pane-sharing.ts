@@ -162,7 +162,10 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     }
     try {
       await scope.client.request("session.visibility.set", params);
-      if (!this.isConnectionScopeCurrent(scope)) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       await scope.sessions.refreshReplacement(agentId);
@@ -172,7 +175,10 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
       }
       await this.loadSessionSharing(refreshedRow, true);
     } catch (error) {
-      if (!this.isConnectionScopeCurrent(scope)) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       this.setSessionSharingState(cacheKey, {
@@ -211,16 +217,25 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     }
     try {
       await scope.client.request(method, params);
-      if (!this.isConnectionScopeCurrent(scope)) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       await this.loadSessionSharing(currentRow, true);
-      if (!this.isConnectionScopeCurrent(scope)) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       await scope.sessions.refreshReplacement(agentId);
     } catch (error) {
-      if (!this.isConnectionScopeCurrent(scope)) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       this.setSessionSharingState(cacheKey, {

@@ -9,7 +9,7 @@ import type {
 } from "../../../../packages/gateway-protocol/src/index.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { GatewaySessionRow } from "../../api/types.ts";
-import { hasOperatorWriteAccess, hasOperatorAdminAccess } from "../../app/operator-access.ts";
+import { hasOperatorAdminAccess, hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { icons } from "../../components/icons.ts";
 import { listSessionCreators } from "../../components/session-owner-chip.ts";
 import { isCloudWorkerPlacementState } from "../../components/session-row-badges.ts";
@@ -122,6 +122,18 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
       method: "session.members.remove",
       requiredScope: "operator.write",
     });
+    const renameAccess = row
+      ? readSessionMethodAccess(this.context.gateway.snapshot, {
+          method: "sessions.patch",
+          params: { key: row.key, label: null },
+        })
+      : null;
+    const renameDisabledReason =
+      this.state?.connected !== true || !renameAccess
+        ? t("sessionsView.actionRequiresConnection")
+        : renameAccess.allowed
+          ? undefined
+          : renameAccess.reason;
     return renderChatPaneHeader({
       paneId: this.paneId,
       narrow: this.narrow,
@@ -148,9 +160,7 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
       platform: this.headerPlatform,
       canReveal,
       copiedAction: this.headerCopiedAction,
-      canRename:
-        this.state?.connected === true &&
-        hasOperatorWriteAccess(this.context.gateway.snapshot.hello?.auth ?? null),
+      renameDisabledReason,
       terminalAction: renderCatalogTerminalButton(this.state, this.catalogSession),
       discussionAction: this.renderSessionDiscussionAction(),
       diffAction: renderSessionDiffToggle(sessionWorkspace),
@@ -260,6 +270,14 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
   }
 
   protected beginHeaderRename(row: GatewaySessionRow): void {
+    const access = readSessionMethodAccess(this.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key: row.key, label: null },
+    });
+    if (!access.allowed) {
+      this.publishHeaderError(access.reason);
+      return;
+    }
     const customLabel = row.label?.trim() || null;
     this.headerRenameSessionKey = row.key;
     this.headerRenameInitialLabel = customLabel;
@@ -292,6 +310,14 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
     this.headerRenameSessionKey = "";
     const state = this.state;
     if (!key || !state || unchangedDerivedTitle || unchangedLabel) {
+      return;
+    }
+    const access = readSessionMethodAccess(this.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key, label },
+    });
+    if (!access.allowed) {
+      this.publishHeaderError(access.reason);
       return;
     }
     void patchChatSessionLabel(state, this.context.sessions, key, label).catch((error: unknown) =>

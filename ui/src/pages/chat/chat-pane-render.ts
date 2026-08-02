@@ -16,6 +16,7 @@ import {
   projectSessionObserverDigest,
   resolveChatPaneObserverRunId,
 } from "../../lib/observer-digest.ts";
+import { readSessionMethodAccess } from "../../lib/session-method-access.ts";
 import { buildAgentMainSessionKey } from "../../lib/sessions/session-key.ts";
 import { renderBoardSessionSurface } from "./board-session-surface.ts";
 import { clearChatHistory } from "./chat-history.ts";
@@ -79,6 +80,14 @@ export class ChatPane extends ChatPaneHeader {
       return html`<main class="app-shell app-shell--booting" aria-busy="true"></main>`;
     }
     const selectedSession = selectedChatSessionRow(state);
+    const runtimePatchAccess = readSessionMethodAccess(this.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key: state.sessionKey, model: null },
+    });
+    const unarchiveAccess = readSessionMethodAccess(this.context.gateway.snapshot, {
+      method: "sessions.patch",
+      params: { key: state.sessionKey, archived: false },
+    });
     const projectedObserverDigest = projectSessionObserverDigest(
       selectedSession?.key ?? state.sessionKey,
       selectedSession?.observerDigest,
@@ -336,7 +345,12 @@ export class ChatPane extends ChatPaneHeader {
               kind: "composer-replacement",
               text: t("chat.archivedSessionDisabled"),
               actionLabel: t("common.unarchive"),
-              onAction: () => void this.restoreArchivedSession(state.sessionKey),
+              disabledReason: unarchiveAccess.allowed ? undefined : unarchiveAccess.reason,
+              onAction: () => {
+                if (unarchiveAccess.allowed) {
+                  void this.restoreArchivedSession(state.sessionKey);
+                }
+              },
             }
           : modelSetupRequired
             ? createChatModelSetupBanner(() => this.context.navigate("model-setup"))
@@ -395,17 +409,26 @@ export class ChatPane extends ChatPaneHeader {
               modelSelectionRuntimeId: selectedSession?.agentRuntime?.id,
               modelSwitching: Boolean(state.chatModelSwitchPromises[state.sessionKey]),
               modelsLoading: state.chatModelsLoading,
+              mutationDisabledReason: runtimePatchAccess.allowed
+                ? undefined
+                : runtimePatchAccess.reason,
               sending: state.chatSending,
               sessionKey: state.sessionKey,
               sessionsResult: state.sessionsResult,
               stream: state.chatStream,
               onRequestUpdate: () => state.requestUpdate?.(),
               onFastModeSelect: (next, targetSessionKey) =>
-                switchChatFastMode(state, next, targetSessionKey),
+                runtimePatchAccess.allowed
+                  ? switchChatFastMode(state, next, targetSessionKey)
+                  : Promise.resolve(false),
               onModelSelect: (next, targetSessionKey) =>
-                switchChatModel(state, next, targetSessionKey),
+                runtimePatchAccess.allowed
+                  ? switchChatModel(state, next, targetSessionKey)
+                  : Promise.resolve(false),
               onThinkingSelect: (next, targetSessionKey) =>
-                switchChatThinkingLevel(state, next, targetSessionKey),
+                runtimePatchAccess.allowed
+                  ? switchChatThinkingLevel(state, next, targetSessionKey)
+                  : Promise.resolve(false),
             },
             onboarding: state.onboarding,
             settings: state.settings,

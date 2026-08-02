@@ -391,6 +391,53 @@ describe.each(mutations)("chat pane $name mutation connection ownership", (mutat
     },
   );
 
+  it.each(["resolve", "reject"] as const)(
+    "drops a stale same-key mutation when the replaced session later %s",
+    async (completion) => {
+      const response = createDeferred<unknown>();
+      const request = vi.fn((method: string) => {
+        if (method !== mutation.method) {
+          throw new Error(`unexpected request: ${method}`);
+        }
+        return response.promise;
+      });
+      const sessions = {
+        refreshReplacement: vi.fn(),
+      } as unknown as SessionCapability;
+      const { pane: testPane, state } = createSharingTestChatPane({
+        client: { request } as unknown as GatewayBrowserClient,
+        sessions,
+      });
+      const pane = testPane as SharingPane;
+      const stale = sessionRow();
+      const pending = mutation.invoke(pane, stale);
+      expect(request).toHaveBeenCalledWith(
+        mutation.method,
+        expect.objectContaining({ sessionKey: stale.key }),
+      );
+
+      const replacement = { ...stale, sessionId: "session-replacement" };
+      state.sessionsResult = sharingSessionsResult(replacement);
+      const cacheKey = pane.sessionSharingCacheKey(replacement.key);
+      const replacementState: ChatSessionSharingState = {
+        loading: false,
+        result: sharingResult(replacement),
+      };
+      pane.sessionSharingStates = new Map([[cacheKey, replacementState]]);
+
+      if (completion === "resolve") {
+        response.resolve({});
+      } else {
+        response.reject(new Error("stale mutation failed"));
+      }
+      await pending;
+
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(sessions.refreshReplacement).not.toHaveBeenCalled();
+      expect(pane.sessionSharingStates.get(cacheKey)).toBe(replacementState);
+    },
+  );
+
   it("preserves the current connection failure in the sharing cache", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === mutation.method) {
