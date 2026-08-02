@@ -7,11 +7,13 @@ import type { ApplicationGatewaySnapshot } from "../app/gateway.ts";
 import { t } from "../i18n/index.ts";
 import { isGatewayMethodAdvertised } from "./gateway-methods.ts";
 
+export type SessionMethodOperatorScope = "operator.read" | SessionMutationOperatorScope;
+
 export type SessionMethodAccess =
-  | { allowed: true; requiredScope: SessionMutationOperatorScope }
+  | { allowed: true; requiredScope: SessionMethodOperatorScope }
   | {
       allowed: false;
-      requiredScope: SessionMutationOperatorScope;
+      requiredScope: SessionMethodOperatorScope;
       reason: string;
       cause: "disconnected" | "method-unavailable" | "missing-scope";
     };
@@ -19,12 +21,12 @@ export type SessionMethodAccess =
 type SessionMethodAccessRequest = {
   method: string;
   params?: unknown;
-  requiredScope?: SessionMutationOperatorScope;
+  requiredScope?: SessionMethodOperatorScope;
 };
 
 function sessionMethodAccessReason(
   cause: Exclude<SessionMethodAccess, { allowed: true }>["cause"],
-  requiredScope: SessionMutationOperatorScope,
+  requiredScope: SessionMethodOperatorScope,
 ): string {
   if (cause === "disconnected") {
     return t("sessionsView.actionRequiresConnection");
@@ -35,7 +37,9 @@ function sessionMethodAccessReason(
   return t(
     requiredScope === "operator.admin"
       ? "sessionsView.actionRequiresAdmin"
-      : "sessionsView.actionRequiresWrite",
+      : requiredScope === "operator.write"
+        ? "sessionsView.actionRequiresWrite"
+        : "sessionsView.actionRequiresRead",
   );
 }
 

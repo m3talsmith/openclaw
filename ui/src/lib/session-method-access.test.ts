@@ -52,6 +52,30 @@ describe("readSessionMethodAccess", () => {
     ).toBe(true);
   });
 
+  it("allows read, write, and admin scopes to satisfy read-scoped actions", () => {
+    for (const scope of ["operator.read", "operator.write", "operator.admin"]) {
+      expect(
+        readSessionMethodAccess(snapshot({ methods: ["session.members.list"], scopes: [scope] }), {
+          method: "session.members.list",
+          requiredScope: "operator.read",
+        }).allowed,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a read-scoped action without a compatible operator scope", () => {
+    expect(
+      readSessionMethodAccess(
+        snapshot({ methods: ["session.members.list"], scopes: ["operator.approvals"] }),
+        { method: "session.members.list", requiredScope: "operator.read" },
+      ),
+    ).toMatchObject({
+      allowed: false,
+      cause: "missing-scope",
+      requiredScope: "operator.read",
+    });
+  });
+
   it("preserves legacy snapshots without advertised auth scopes", () => {
     expect(
       readSessionMethodAccess(snapshot({ includeAuth: false }), {

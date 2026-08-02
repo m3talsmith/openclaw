@@ -17,6 +17,7 @@ import { hasSessionPresenceViewers } from "../../components/viewer-facepile.ts";
 import { t } from "../../i18n/index.ts";
 import { copyToClipboard } from "../../lib/clipboard.ts";
 import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
+import { readSessionMethodAccess } from "../../lib/session-method-access.ts";
 import { parseAgentSessionKey } from "../../lib/sessions/session-key.ts";
 import { renderBoardDockMenu, renderBoardFaceToggle } from "./board-session-surface.ts";
 import { ChatPaneContext } from "./chat-pane-context.ts";
@@ -100,6 +101,29 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
       : branchSwitchWorking
         ? t("chat.sessionHeader.branchSwitchUnavailable")
         : null;
+    const sharingSnapshot = this.context.gateway.snapshot;
+    const sharingMethodsSupported = [
+      "session.visibility.set",
+      "session.members.list",
+      "session.members.add",
+      "session.members.remove",
+    ].some((method) => isGatewayMethodAdvertised(sharingSnapshot, method) !== false);
+    const sharingReadAccess = readSessionMethodAccess(sharingSnapshot, {
+      method: "session.members.list",
+      requiredScope: "operator.read",
+    });
+    const sharingVisibilityAccess = readSessionMethodAccess(sharingSnapshot, {
+      method: "session.visibility.set",
+      requiredScope: "operator.write",
+    });
+    const sharingMemberAddAccess = readSessionMethodAccess(sharingSnapshot, {
+      method: "session.members.add",
+      requiredScope: "operator.write",
+    });
+    const sharingMemberRemoveAccess = readSessionMethodAccess(sharingSnapshot, {
+      method: "session.members.remove",
+      requiredScope: "operator.write",
+    });
     return renderChatPaneHeader({
       paneId: this.paneId,
       narrow: this.narrow,
@@ -156,20 +180,29 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
         this.syncChatSidebarForDock(face === "dashboard" ? board.dock : "hidden");
         this.persistBoardSessionView({ face });
       }),
-      sharingControl:
-        isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.visibility.set") === true
-          ? renderChatSessionSharing({
-              session: row,
-              state: row
-                ? this.sessionSharingStates.get(this.sessionSharingCacheKey(row.key))
-                : undefined,
-              onOpen: () => row && void this.loadSessionSharing(row),
-              onVisibilityChange: (visibility) =>
-                row && void this.setSessionVisibility(row, visibility),
-              onMemberChange: (identityId, member) =>
-                row && void this.setSessionMember(row, identityId, member),
-            })
-          : nothing,
+      sharingControl: sharingMethodsSupported
+        ? renderChatSessionSharing({
+            session: row,
+            state: row
+              ? this.sessionSharingStates.get(this.sessionSharingCacheKey(row.key))
+              : undefined,
+            openDisabledReason: sharingReadAccess.allowed ? undefined : sharingReadAccess.reason,
+            visibilityDisabledReason: sharingVisibilityAccess.allowed
+              ? undefined
+              : sharingVisibilityAccess.reason,
+            memberAddDisabledReason: sharingMemberAddAccess.allowed
+              ? undefined
+              : sharingMemberAddAccess.reason,
+            memberRemoveDisabledReason: sharingMemberRemoveAccess.allowed
+              ? undefined
+              : sharingMemberRemoveAccess.reason,
+            onOpen: () => row && void this.loadSessionSharing(row),
+            onVisibilityChange: (visibility) =>
+              row && void this.setSessionVisibility(row, visibility),
+            onMemberChange: (identityId, member) =>
+              row && void this.setSessionMember(row, identityId, member),
+          })
+        : nothing,
       boardDockAction: renderBoardDockMenu(
         board.hasBoard && !board.activeTabReadOnly && board.provider.canMutate,
         board.face,

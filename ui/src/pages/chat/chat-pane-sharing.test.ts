@@ -18,11 +18,48 @@ import type { ChatPageHost } from "./chat-state-host.ts";
 import type { ChatSessionSharingState } from "./components/chat-session-sharing.ts";
 
 type SharingPane = TestChatPane & {
+  loadSessionSharing: (row: GatewaySessionRow, force?: boolean) => Promise<void>;
   sessionSharingCacheKey: (sessionKey: string) => string;
   sessionSharingStates: Map<string, ChatSessionSharingState>;
   setSessionMember: (row: GatewaySessionRow, identityId: string, member: boolean) => Promise<void>;
   setSessionVisibility: (row: GatewaySessionRow, visibility: SessionVisibility) => Promise<void>;
 };
+
+const SHARING_METHODS = [
+  "session.visibility.set",
+  "session.members.list",
+  "session.members.add",
+  "session.members.remove",
+];
+
+function setSharingAuthorization(
+  pane: SharingPane,
+  params: {
+    methods?: string[];
+    phase?: "connected" | "reconnecting";
+    scopes?: string[];
+  } = {},
+): void {
+  const snapshot = pane.context.gateway.snapshot;
+  snapshot.phase = params.phase ?? "connected";
+  snapshot.hello = {
+    ...snapshot.hello,
+    auth: {
+      role: "operator",
+      scopes: params.scopes ?? ["operator.admin"],
+    },
+    features: {
+      ...snapshot.hello?.features,
+      methods: params.methods ?? SHARING_METHODS,
+    },
+  } as typeof snapshot.hello;
+}
+
+function createSharingTestChatPane(params: Parameters<typeof createTestChatPane>[0]) {
+  const result = createTestChatPane(params);
+  setSharingAuthorization(result.pane as SharingPane);
+  return result;
+}
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -68,6 +105,7 @@ function replaceConnection(
 ): void {
   pane.connectionGeneration += 1;
   pane.context = createSessionContext(client, sessions);
+  setSharingAuthorization(pane);
   pane.state = state;
   state.client = client;
   state.connected = true;
@@ -108,6 +146,126 @@ const mutations = [
   },
 ] as const;
 
+describe("chat pane sharing authorization", () => {
+  it("allows read-scoped owners to load sharing data but not mutate it", async () => {
+    const row = sessionRow();
+    const request = vi.fn(async (method: string) => {
+      if (method === "session.members.list") {
+        return sharingResult(row);
+      }
+      throw new Error(`unexpected request: ${method}`);
+    });
+    const sessions = {
+      refreshReplacement: vi.fn(),
+    } as unknown as SessionCapability;
+    const { pane: testPane } = createSharingTestChatPane({
+      client: { request } as unknown as GatewayBrowserClient,
+      sessions,
+    });
+    const pane = testPane as SharingPane;
+    setSharingAuthorization(pane, { scopes: ["operator.read"] });
+
+    await pane.loadSessionSharing(row);
+    await pane.setSessionVisibility(row, "shared");
+    await pane.setSessionMember(row, "identity-alice", true);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "session.members.list",
+      expect.objectContaining({ sessionKey: row.key }),
+    );
+    expect(sessions.refreshReplacement).not.toHaveBeenCalled();
+  });
+
+  it("allows write and admin scoped owners to mutate sharing", async () => {
+    for (const scope of ["operator.write", "operator.admin"]) {
+      const row = sessionRow();
+      const request = vi.fn(async (method: string) => {
+        if (method === "session.members.list") {
+          return sharingResult(row);
+        }
+        return {};
+      });
+      const sessions = {
+        refreshReplacement: vi.fn(async () => undefined),
+      } as unknown as SessionCapability;
+      const { pane: testPane } = createSharingTestChatPane({
+        client: { request } as unknown as GatewayBrowserClient,
+        sessions,
+      });
+      const pane = testPane as SharingPane;
+      setSharingAuthorization(pane, { scopes: [scope] });
+
+      await pane.setSessionVisibility(row, "shared");
+      await pane.setSessionMember(row, "identity-alice", true);
+
+      expect(request).toHaveBeenCalledWith(
+        "session.visibility.set",
+        expect.objectContaining({ sessionKey: row.key }),
+      );
+      expect(request).toHaveBeenCalledWith(
+        "session.members.add",
+        expect.objectContaining({ sessionKey: row.key }),
+      );
+    }
+  });
+
+  it("refuses sharing requests for non-managers and disconnected snapshots", async () => {
+    for (const authorization of [
+      { row: { ...sessionRow(), sharingRole: "member" as const } },
+      { row: sessionRow(), phase: "reconnecting" as const },
+    ]) {
+      const request = vi.fn();
+      const sessions = {
+        refreshReplacement: vi.fn(),
+      } as unknown as SessionCapability;
+      const { pane: testPane } = createSharingTestChatPane({
+        client: { request } as unknown as GatewayBrowserClient,
+        sessions,
+      });
+      const pane = testPane as SharingPane;
+      setSharingAuthorization(pane, {
+        phase: authorization.phase,
+        scopes: ["operator.admin"],
+      });
+
+      await pane.loadSessionSharing(authorization.row);
+      await pane.setSessionVisibility(authorization.row, "shared");
+      await pane.setSessionMember(authorization.row, "identity-alice", true);
+
+      expect(request).not.toHaveBeenCalled();
+      expect(sessions.refreshReplacement).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses explicitly unadvertised sharing methods", async () => {
+    const row = sessionRow();
+    const request = vi.fn(async () => sharingResult(row));
+    const sessions = {
+      refreshReplacement: vi.fn(),
+    } as unknown as SessionCapability;
+    const { pane: testPane } = createSharingTestChatPane({
+      client: { request } as unknown as GatewayBrowserClient,
+      sessions,
+    });
+    const pane = testPane as SharingPane;
+    setSharingAuthorization(pane, {
+      methods: ["session.members.list"],
+      scopes: ["operator.admin"],
+    });
+
+    await pane.loadSessionSharing(row);
+    await pane.setSessionVisibility(row, "shared");
+    await pane.setSessionMember(row, "identity-alice", true);
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "session.members.list",
+      expect.objectContaining({ sessionKey: row.key }),
+    );
+  });
+});
+
 describe.each(mutations)("chat pane $name mutation connection ownership", (mutation) => {
   it.each(["resolve", "reject"] as const)(
     "drops a stale mutation when the previous connection later %s",
@@ -122,7 +280,7 @@ describe.each(mutations)("chat pane $name mutation connection ownership", (mutat
       const oldSessions = {
         refreshReplacement: vi.fn(),
       } as unknown as SessionCapability;
-      const { pane: testPane, state } = createTestChatPane({
+      const { pane: testPane, state } = createSharingTestChatPane({
         client: { request: oldRequest } as unknown as GatewayBrowserClient,
         sessions: oldSessions,
       });
@@ -159,7 +317,7 @@ describe.each(mutations)("chat pane $name mutation connection ownership", (mutat
     const sessions = {
       refreshReplacement: vi.fn(),
     } as unknown as SessionCapability;
-    const { pane: testPane } = createTestChatPane({
+    const { pane: testPane } = createSharingTestChatPane({
       client: { request } as unknown as GatewayBrowserClient,
       sessions,
     });
@@ -190,7 +348,7 @@ describe("chat pane sharing mutation phase ownership", () => {
       const oldSessions = {
         refreshReplacement: vi.fn(() => refreshed.promise),
       } as unknown as SessionCapability;
-      const { pane: testPane, state } = createTestChatPane({
+      const { pane: testPane, state } = createSharingTestChatPane({
         client: { request } as unknown as GatewayBrowserClient,
         sessions: oldSessions,
       });
@@ -232,7 +390,7 @@ describe("chat pane sharing mutation phase ownership", () => {
         const oldSessions = {
           refreshReplacement: vi.fn(async () => undefined),
         } as unknown as SessionCapability;
-        const { pane: testPane, state } = createTestChatPane({
+        const { pane: testPane, state } = createSharingTestChatPane({
           client: { request } as unknown as GatewayBrowserClient,
           sessions: oldSessions,
         });
@@ -277,7 +435,7 @@ describe("chat pane sharing mutation phase ownership", () => {
     const oldSessions = {
       refreshReplacement: vi.fn(() => refreshed.promise),
     } as unknown as SessionCapability;
-    const { pane: testPane, state } = createTestChatPane({
+    const { pane: testPane, state } = createSharingTestChatPane({
       client: { request } as unknown as GatewayBrowserClient,
       sessions: oldSessions,
     });
@@ -313,7 +471,7 @@ describe("chat pane current sharing mutation refresh order", () => {
         calls.push("sessions.refreshReplacement");
       }),
     } as unknown as SessionCapability;
-    const { pane: testPane } = createTestChatPane({
+    const { pane: testPane } = createSharingTestChatPane({
       client: { request } as unknown as GatewayBrowserClient,
       sessions,
     });
@@ -346,7 +504,7 @@ describe("chat pane current sharing mutation refresh order", () => {
         calls.push("sessions.refreshReplacement");
       }),
     } as unknown as SessionCapability;
-    const { pane: testPane } = createTestChatPane({
+    const { pane: testPane } = createSharingTestChatPane({
       client: { request } as unknown as GatewayBrowserClient,
       sessions,
     });
