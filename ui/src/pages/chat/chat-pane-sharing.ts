@@ -50,20 +50,38 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     return `${this.sessionSharingAgentId(sessionKey) ?? ""}\0${sessionKey}`;
   }
 
+  protected currentSessionSharingRow(
+    scope: ChatPaneConnectionScope,
+    row: GatewaySessionRow,
+  ): GatewaySessionRow | null {
+    const current = scope.state.sessionsResult?.sessions.find((candidate) =>
+      areUiSessionKeysEquivalent(candidate.key, row.key),
+    );
+    if (!current || !canManageChatSessionSharing(row) || !canManageChatSessionSharing(current)) {
+      return null;
+    }
+    if (current === row) {
+      return current;
+    }
+    const rowSessionId = row.sessionId?.trim();
+    const currentSessionId = current.sessionId?.trim();
+    return rowSessionId && currentSessionId && rowSessionId === currentSessionId ? current : null;
+  }
+
   protected async loadSessionSharing(row: GatewaySessionRow, force = false): Promise<void> {
-    const state = this.state;
+    const scope = this.captureConnectionScope();
+    const currentRow = scope ? this.currentSessionSharingRow(scope, row) : null;
     if (
-      !state?.connected ||
-      !state.client ||
-      !canManageChatSessionSharing(row) ||
-      !readSessionMethodAccess(this.context.gateway.snapshot, {
+      !scope ||
+      !currentRow ||
+      !readSessionMethodAccess(scope.context.gateway.snapshot, {
         method: "session.members.list",
         requiredScope: "operator.read",
       }).allowed
     ) {
       return;
     }
-    const cacheKey = this.sessionSharingCacheKey(row.key);
+    const cacheKey = this.sessionSharingCacheKey(currentRow.key);
     const current = this.sessionSharingStates.get(cacheKey);
     if (current?.loading && !force) {
       return;
@@ -72,21 +90,26 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     // gateway/account change bumps the generation and clears this cache, so a
     // request that resolves after the switch must be dropped rather than
     // overwrite the new connection's menu with the previous account's data.
-    const generation = this.connectionGeneration;
     this.setSessionSharingState(cacheKey, { ...current, loading: true, error: undefined });
     try {
-      const result = await state.client.request<SessionMembersListResult>("session.members.list", {
-        sessionKey: row.key,
-        ...(this.sessionSharingAgentId(row.key)
-          ? { agentId: this.sessionSharingAgentId(row.key) }
+      const result = await scope.client.request<SessionMembersListResult>("session.members.list", {
+        sessionKey: currentRow.key,
+        ...(this.sessionSharingAgentId(currentRow.key)
+          ? { agentId: this.sessionSharingAgentId(currentRow.key) }
           : {}),
       });
-      if (this.connectionGeneration !== generation) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       this.setSessionSharingState(cacheKey, { loading: false, result });
     } catch (error) {
-      if (this.connectionGeneration !== generation) {
+      if (
+        !this.isConnectionScopeCurrent(scope) ||
+        !this.currentSessionSharingRow(scope, currentRow)
+      ) {
         return;
       }
       this.setSessionSharingState(cacheKey, { loading: false, error: String(error) });
@@ -98,13 +121,14 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     visibility: SessionVisibility,
   ): Promise<void> {
     const scope = this.captureConnectionScope();
-    if (!scope || visibility === row.visibility || !canManageChatSessionSharing(row)) {
+    const currentRow = scope ? this.currentSessionSharingRow(scope, row) : null;
+    if (!scope || !currentRow || visibility === currentRow.visibility) {
       return;
     }
-    const agentId = this.sessionSharingAgentId(row.key);
-    const cacheKey = this.sessionSharingCacheKey(row.key);
+    const agentId = this.sessionSharingAgentId(currentRow.key);
+    const cacheKey = this.sessionSharingCacheKey(currentRow.key);
     const params = {
-      sessionKey: row.key,
+      sessionKey: currentRow.key,
       visibility,
       ...(agentId ? { agentId } : {}),
     };
@@ -122,10 +146,11 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
         return;
       }
       await scope.sessions.refreshReplacement(agentId);
-      if (!this.isConnectionScopeCurrent(scope)) {
+      const refreshedRow = this.currentSessionSharingRow(scope, currentRow);
+      if (!this.isConnectionScopeCurrent(scope) || !refreshedRow) {
         return;
       }
-      await this.loadSessionSharing(row, true);
+      await this.loadSessionSharing(refreshedRow, true);
     } catch (error) {
       if (!this.isConnectionScopeCurrent(scope)) {
         return;
@@ -144,14 +169,15 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     member: boolean,
   ): Promise<void> {
     const scope = this.captureConnectionScope();
-    if (!scope || !canManageChatSessionSharing(row)) {
+    const currentRow = scope ? this.currentSessionSharingRow(scope, row) : null;
+    if (!scope || !currentRow) {
       return;
     }
-    const agentId = this.sessionSharingAgentId(row.key);
-    const cacheKey = this.sessionSharingCacheKey(row.key);
+    const agentId = this.sessionSharingAgentId(currentRow.key);
+    const cacheKey = this.sessionSharingCacheKey(currentRow.key);
     const method = member ? "session.members.add" : "session.members.remove";
     const params = {
-      sessionKey: row.key,
+      sessionKey: currentRow.key,
       identityId,
       ...(agentId ? { agentId } : {}),
     };
@@ -168,7 +194,7 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
       if (!this.isConnectionScopeCurrent(scope)) {
         return;
       }
-      await this.loadSessionSharing(row, true);
+      await this.loadSessionSharing(currentRow, true);
       if (!this.isConnectionScopeCurrent(scope)) {
         return;
       }

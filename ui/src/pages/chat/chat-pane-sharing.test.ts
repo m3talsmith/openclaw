@@ -7,6 +7,7 @@ import type {
   GatewaySessionRow,
   SessionMembersListResult,
   SessionVisibility,
+  SessionsListResult,
 } from "../../api/types.ts";
 import type { SessionCapability } from "../../lib/sessions/index.ts";
 import {
@@ -58,6 +59,8 @@ function setSharingAuthorization(
 function createSharingTestChatPane(params: Parameters<typeof createTestChatPane>[0]) {
   const result = createTestChatPane(params);
   setSharingAuthorization(result.pane as SharingPane);
+  result.state.sessionsResult = sharingSessionsResult(sessionRow());
+  result.state.sessionsResultAgentId = "main";
   return result;
 }
 
@@ -81,9 +84,24 @@ function sessionRow(): GatewaySessionRow {
   return {
     key: "agent:main:current",
     kind: "direct",
+    sessionId: "session-current",
     updatedAt: 1,
     visibility: "draft",
     sharingRole: "owner",
+  };
+}
+
+function sharingSessionsResult(row: GatewaySessionRow): SessionsListResult {
+  return {
+    ts: 1,
+    path: "",
+    count: 1,
+    defaults: {
+      modelProvider: null,
+      model: null,
+      contextTokens: null,
+    },
+    sessions: [row],
   };
 }
 
@@ -263,6 +281,36 @@ describe("chat pane sharing authorization", () => {
       "session.members.list",
       expect.objectContaining({ sessionKey: row.key }),
     );
+  });
+
+  it.each([
+    {
+      name: "a replacement session",
+      current: { ...sessionRow(), sessionId: "session-replacement" },
+    },
+    {
+      name: "a current non-manager role",
+      current: { ...sessionRow(), sharingRole: "member" as const },
+    },
+  ])("refuses callbacks retained from $name", async ({ current }) => {
+    const request = vi.fn();
+    const sessions = {
+      refreshReplacement: vi.fn(),
+    } as unknown as SessionCapability;
+    const { pane: testPane, state } = createSharingTestChatPane({
+      client: { request } as unknown as GatewayBrowserClient,
+      sessions,
+    });
+    const pane = testPane as SharingPane;
+    const stale = sessionRow();
+    state.sessionsResult = sharingSessionsResult(current);
+
+    await pane.loadSessionSharing(stale);
+    await pane.setSessionVisibility(stale, "shared");
+    await pane.setSessionMember(stale, "identity-alice", true);
+
+    expect(request).not.toHaveBeenCalled();
+    expect(sessions.refreshReplacement).not.toHaveBeenCalled();
   });
 });
 
