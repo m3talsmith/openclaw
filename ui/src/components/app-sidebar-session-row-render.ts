@@ -217,13 +217,19 @@ export function renderRecentSession(params: {
     .filter(Boolean)
     .join(" ");
   const childrenExpanded = host.isSessionChildrenExpanded(session);
+  const groupWriteAccess = host.readSessionMutationAccess({
+    method: "sessions.groups.put",
+    requiredScope: "operator.write",
+  });
+  const rowDraggable = !session.isChild && groupWriteAccess.allowed;
   const row = html`
     <div
       class=${rowClass}
       data-session-key=${session.key}
       role="listitem"
-      draggable=${session.isChild ? "false" : "true"}
-      @dragstart=${session.isChild
+      draggable=${rowDraggable ? "true" : "false"}
+      title=${!session.isChild && !groupWriteAccess.allowed ? groupWriteAccess.reason : nothing}
+      @dragstart=${!rowDraggable
         ? nothing
         : (event: DragEvent) => {
             if (event.dataTransfer) {
@@ -231,7 +237,7 @@ export function renderRecentSession(params: {
               host.startSessionDrag(session);
             }
           }}
-      @dragend=${session.isChild
+      @dragend=${!rowDraggable
         ? nothing
         : () => {
             host.finishSessionDrag();

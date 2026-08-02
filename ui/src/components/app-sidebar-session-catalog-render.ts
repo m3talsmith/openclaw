@@ -56,6 +56,7 @@ type SessionCatalogGroupsParams = {
   onLoadMore: (catalogId: string) => void;
   onOpenNewSession?: (agentId: string, target?: NewSessionTarget) => void;
   newSessionDisabledReason?: string;
+  sectionDragDisabledReason?: string;
   onNavigate?: (routeId: NavigationRouteId, options?: ApplicationNavigationOptions) => void;
   catalogOpenTarget: "viewer" | "terminal";
   terminalAvailable: boolean;
@@ -159,12 +160,19 @@ export function renderSessionCatalogGroups(params: SessionCatalogGroupsParams) {
       <div
         class=${sectionClass}
         data-session-section=${sectionId}
-        @dragover=${(event: DragEvent) => params.onSectionDragOver(event, sectionId)}
-        @dragleave=${(event: DragEvent) => params.onSectionDragLeave(event, sectionId)}
-        @drop=${(event: DragEvent) => params.onSectionDrop(event, sectionId)}
+        @dragover=${params.sectionDragDisabledReason
+          ? nothing
+          : (event: DragEvent) => params.onSectionDragOver(event, sectionId)}
+        @dragleave=${params.sectionDragDisabledReason
+          ? nothing
+          : (event: DragEvent) => params.onSectionDragLeave(event, sectionId)}
+        @drop=${params.sectionDragDisabledReason
+          ? nothing
+          : (event: DragEvent) => params.onSectionDrop(event, sectionId)}
       >
         ${renderSidebarSessionSectionHeader({
           sectionId,
+          disabledReason: params.sectionDragDisabledReason,
           onStartDrag: params.onStartSectionDrag,
           onFinishDrag: params.onFinishSectionDrag,
           content: html`

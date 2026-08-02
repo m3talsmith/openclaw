@@ -297,6 +297,9 @@ export function renderApplicationShell(host: ShellViewHost) {
               .historyOnly=${settingsTakeover}
               .canGoBack=${host.nativeHistoryState.canGoBack}
               .canGoForward=${host.nativeHistoryState.canGoForward}
+              .newSessionDisabledReason=${newSessionAccess.allowed
+                ? undefined
+                : newSessionAccess.reason}
               .onToggleSidebar=${() => host.toggleNavigationSurface()}
               .onOpenPalette=${() => host.openPalette()}
               .onOpenNewSession=${() => host.handleNativeNewSession()}

@@ -813,7 +813,7 @@ function setDropTargetActive(event: DragEvent, active: boolean) {
 }
 
 function categoryDropHandlers(props: SessionsProps, category: string | null) {
-  if (props.groupBy !== "category") {
+  if (props.groupBy !== "category" || props.groupWriteDisabledReason) {
     return { dragover: nothing, dragleave: nothing, drop: nothing } as const;
   }
   const carriesSessionKey = (event: DragEvent) =>
@@ -878,10 +878,14 @@ function renderCategoryCell(row: GatewaySessionRow, props: SessionsProps) {
   return html`
     <td>
       <select
-        ?disabled=${props.loading}
+        ?disabled=${props.loading || Boolean(props.groupWriteDisabledReason)}
+        title=${props.groupWriteDisabledReason ?? nothing}
         aria-label=${t("sessionsView.moveToGroup")}
         class="session-group-select"
         @change=${(e: Event) => {
+          if (props.groupWriteDisabledReason) {
+            return;
+          }
           const select = e.target as HTMLSelectElement;
           if (select.value === NEW_GROUP_OPTION) {
             // The page prompts for a name and patches; restore until the refresh lands.
@@ -945,6 +949,7 @@ function renderFilterToggle(params: {
 function renderOverrideSelect(params: {
   label: string;
   disabled: boolean;
+  disabledReason?: string;
   options: readonly { value: string; label: string }[];
   current: string;
   onChange: (value: string) => void;
@@ -955,6 +960,7 @@ function renderOverrideSelect(params: {
       <select
         class="settings-select"
         ?disabled=${params.disabled}
+        title=${params.disabledReason ?? nothing}
         @change=${(e: Event) => params.onChange((e.target as HTMLSelectElement).value)}
       >
         ${params.options.map(
@@ -1679,6 +1685,7 @@ function renderSessionDetailsRow(params: {
             ${renderOverrideSelect({
               label: t("sessionsView.thinking"),
               disabled: props.loading || Boolean(props.patchAdminDisabledReason),
+              disabledReason: props.patchAdminDisabledReason,
               options: thinkLevels,
               current: thinking,
               onChange: (value) => props.onPatch(row.key, { thinkingLevel: value || null }),
@@ -1686,6 +1693,7 @@ function renderSessionDetailsRow(params: {
             ${renderOverrideSelect({
               label: t("sessionsView.fast"),
               disabled: props.loading || Boolean(props.patchAdminDisabledReason),
+              disabledReason: props.patchAdminDisabledReason,
               options: fastLevels,
               current: fastMode,
               onChange: (value) =>
@@ -1696,6 +1704,7 @@ function renderSessionDetailsRow(params: {
             ${renderOverrideSelect({
               label: t("sessionsView.verbose"),
               disabled: props.loading || Boolean(props.patchAdminDisabledReason),
+              disabledReason: props.patchAdminDisabledReason,
               options: verboseLevels,
               current: verbose,
               onChange: (value) => props.onPatch(row.key, { verboseLevel: value || null }),
@@ -1703,6 +1712,7 @@ function renderSessionDetailsRow(params: {
             ${renderOverrideSelect({
               label: t("sessionsView.reasoning"),
               disabled: props.loading || Boolean(props.patchAdminDisabledReason),
+              disabledReason: props.patchAdminDisabledReason,
               options: reasoningLevels.map((level) => ({
                 value: level,
                 label: level || t("sessionsView.inherit"),
