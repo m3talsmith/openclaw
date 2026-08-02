@@ -40,6 +40,7 @@ import {
 } from "./chat-pane-state.ts";
 import { dismissRealtimeTalkError } from "./chat-realtime.ts";
 import { activeChatRunStartupStatus } from "./chat-run-startup.ts";
+import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { switchChatFastMode, switchChatModel, switchChatThinkingLevel } from "./chat-session.ts";
 import { refreshChatCommands, refreshPageChat } from "./chat-state-refresh.ts";
 import {
@@ -88,6 +89,21 @@ export class ChatPane extends ChatPaneHeader {
       method: "sessions.patch",
       params: { key: state.sessionKey, archived: false },
     });
+    const sessionActionAccess = readChatSessionActionAccess(
+      this.context.gateway.snapshot,
+      Boolean(state.chatRunId),
+    );
+    const requireSessionAction = (action: keyof typeof sessionActionAccess): boolean => {
+      const access = readChatSessionActionAccess(
+        this.context.gateway.snapshot,
+        Boolean(state.chatRunId),
+      )[action];
+      if (access.allowed) {
+        return true;
+      }
+      this.publishHeaderError(access.reason);
+      return false;
+    };
     const projectedObserverDigest = projectSessionObserverDigest(
       selectedSession?.key ?? state.sessionKey,
       selectedSession?.observerDigest,
@@ -513,7 +529,13 @@ export class ChatPane extends ChatPaneHeader {
           : suggestionViewer
             ? void this.addCurrentSessionSuggestion()
             : void state.handleSendChat(),
-      onCompact: () => void state.handleSendChat("/compact"),
+      onCompact: sessionActionAccess.compact.allowed
+        ? () => {
+            if (requireSessionAction("compact")) {
+              void state.handleSendChat("/compact");
+            }
+          }
+        : undefined,
       onOpenSessionCheckpoints: () => {
         const search = new URLSearchParams({ session: state.sessionKey });
         if (selectedSessionArchived) {
@@ -537,9 +559,14 @@ export class ChatPane extends ChatPaneHeader {
         state.chatError = message;
         state.requestUpdate?.();
       },
-      onAbort: sessionParticipationBlocked
-        ? undefined
-        : () => void state.handleAbortChat({ preserveDraft: true }),
+      onAbort:
+        sessionParticipationBlocked || !sessionActionAccess.abort.allowed
+          ? undefined
+          : () => {
+              if (requireSessionAction("abort")) {
+                void state.handleAbortChat({ preserveDraft: true });
+              }
+            },
       onQueueRemove: state.removeQueuedMessage,
       onQueueRetry: (id) => void state.retryQueuedChatMessage(id),
       onQueueSteer: sessionParticipationBlocked
@@ -557,10 +584,25 @@ export class ChatPane extends ChatPaneHeader {
         state.chatReplyTarget = target;
         state.requestUpdate?.();
       },
-      onRewindMessage: (entryId) => this.rewindToMessage(entryId),
-      onForkMessage: (entryId) => this.forkFromMessage(entryId),
+      onRewindMessage: sessionActionAccess.rewind.allowed
+        ? (entryId) => (requireSessionAction("rewind") ? this.rewindToMessage(entryId) : false)
+        : undefined,
+      onForkMessage: sessionActionAccess.fork.allowed
+        ? (entryId) => {
+            if (requireSessionAction("fork")) {
+              return this.forkFromMessage(entryId);
+            }
+            return undefined;
+          }
+        : undefined,
       onNewSession: () => void this.createSession(),
-      onClearHistory: () => void clearChatHistory(state),
+      onClearHistory: sessionActionAccess.reset.allowed
+        ? () => {
+            if (requireSessionAction("reset")) {
+              void clearChatHistory(state);
+            }
+          }
+        : undefined,
       agentsList: state.agentsList,
       currentAgentId,
       ...chatProps,

@@ -22,6 +22,7 @@ import { parseAgentSessionKey } from "../../lib/sessions/session-key.ts";
 import { renderBoardDockMenu, renderBoardFaceToggle } from "./board-session-surface.ts";
 import { ChatPaneContext } from "./chat-pane-context.ts";
 import { headerPlatformByClient } from "./chat-pane-shared.ts";
+import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { patchChatSessionLabel } from "./chat-state-route.ts";
 import { renderCatalogTerminalButton } from "./components/catalog-terminal-button.ts";
 import {
@@ -94,10 +95,12 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
           sessionKey: this.state.sessionKey,
         })
       : false;
-    const branchSwitchDisabledReason = !hasOperatorAdminAccess(
-      this.context.gateway.snapshot.hello?.auth ?? null,
-    )
-      ? t("chat.sessionHeader.branchSwitchRequiresAdmin")
+    const branchSwitchAccess = readChatSessionActionAccess(
+      this.context.gateway.snapshot,
+      Boolean(this.state?.chatRunId),
+    ).branchSwitch;
+    const branchSwitchDisabledReason = !branchSwitchAccess.allowed
+      ? branchSwitchAccess.reason
       : branchSwitchWorking
         ? t("chat.sessionHeader.branchSwitchUnavailable")
         : null;
@@ -236,7 +239,17 @@ export abstract class ChatPaneHeader extends ChatPaneContext {
           this.handleHeaderMenuAction(action, row, workspace.root, branch);
         }
       },
-      onBranchSelect: (leafEntryId) => void this.switchToBranch(leafEntryId),
+      onBranchSelect: (leafEntryId) => {
+        const access = readChatSessionActionAccess(
+          this.context.gateway.snapshot,
+          Boolean(this.state?.chatRunId),
+        ).branchSwitch;
+        if (!access.allowed) {
+          this.publishHeaderError(access.reason);
+          return;
+        }
+        void this.switchToBranch(leafEntryId);
+      },
       onOpenSplitView: this.onOpenSplitView,
       onSplitDown: this.onSplitDown,
       onSplitRight: this.onSplitRight,
