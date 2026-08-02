@@ -65,11 +65,11 @@ describe("readSessionMethodAccess", () => {
     expect(
       readSessionMethodAccess(snapshot({ connected: false }), {
         method: "sessions.create",
-      }).cause,
-    ).toBe("disconnected");
+      }),
+    ).toMatchObject({ allowed: false, cause: "disconnected" });
     expect(
-      readSessionMethodAccess(snapshot({ methods: [] }), { method: "sessions.create" }).cause,
-    ).toBe("method-unavailable");
+      readSessionMethodAccess(snapshot({ methods: [] }), { method: "sessions.create" }),
+    ).toMatchObject({ allowed: false, cause: "method-unavailable" });
   });
 
   it("allows legacy snapshots without method metadata", () => {

@@ -16,7 +16,7 @@ export type SessionMethodAccess =
       cause: "disconnected" | "method-unavailable" | "missing-scope";
     };
 
-export type SessionMethodAccessRequest = {
+type SessionMethodAccessRequest = {
   method: string;
   params?: unknown;
   requiredScope?: SessionMutationOperatorScope;

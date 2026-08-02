@@ -80,6 +80,7 @@ function renderSessionSection(params: {
   const collapsedAttentionDot =
     collapsed &&
     section.rows.some((row) => rowDemandsVisibility(row, RowVisibilityReason.Attention));
+  const newSessionAccess = host.readNewSessionAccess();
   const sectionClass = [
     "sidebar-recent-sessions__group",
     `sidebar-recent-sessions__group--zone-${zone}`,
@@ -167,11 +168,11 @@ function renderSessionSection(params: {
                 <button
                   type="button"
                   class="sidebar-session-group-actions sidebar-new-session"
-                  title=${host.connected
+                  title=${newSessionAccess.allowed
                     ? t("chat.runControls.newSession")
-                    : t("chat.runControls.newSessionDisconnected")}
+                    : newSessionAccess.reason}
                   aria-label=${t("chat.runControls.newSession")}
-                  ?disabled=${!host.connected}
+                  ?disabled=${!newSessionAccess.allowed}
                   @click=${(event: MouseEvent) => {
                     event.stopPropagation();
                     host.openNewSession();
@@ -303,6 +304,7 @@ function renderSessionCatalog(params: {
   renderer: SessionCatalogGroupsRenderer;
 }) {
   const { host, snapshot, catalog, renderer } = params;
+  const newSessionAccess = host.readNewSessionAccess();
   return html`
     ${renderer({
       catalogs: [catalog],
@@ -340,7 +342,8 @@ function renderSessionCatalog(params: {
       creatorFilterActive: host.sessionCreatorFilterActive,
       onOpenViewMenu: (trigger) => host.sidebarMenus.toggleCatalogViewMenu(trigger),
       onLoadMore: (catalogId) => void host.sessionData.loadMoreSessionCatalog(catalogId),
-      onOpenNewSession: host.onOpenNewSession,
+      onOpenNewSession: (agentId, target) => host.requestOpenNewSession(agentId, target),
+      newSessionDisabledReason: newSessionAccess.allowed ? undefined : newSessionAccess.reason,
       onNavigate: host.onNavigate,
       catalogOpenTarget: snapshot.catalogOpenTarget,
       terminalAvailable: snapshot.terminalAvailable,

@@ -113,6 +113,8 @@ export interface SessionListHost {
   finishSidebarSectionDrag(): void;
   toggleSection(sectionId: string): void;
   openNewSession(): void;
+  readNewSessionAccess(): import("../lib/session-method-access.ts").SessionMethodAccess;
+  requestOpenNewSession(agentId: string, target?: NewSessionTarget): void;
   setVisibleSessionLimit(sectionId: string, limit: number): void;
   clearSessionSelection(): void;
   handleSessionListDragOver(event: DragEvent): void;
