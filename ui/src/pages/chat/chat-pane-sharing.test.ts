@@ -312,6 +312,42 @@ describe("chat pane sharing authorization", () => {
     expect(request).not.toHaveBeenCalled();
     expect(sessions.refreshReplacement).not.toHaveBeenCalled();
   });
+
+  it("releases a stale same-key sharing load for the replacement session", async () => {
+    const stale = sessionRow();
+    const replacement = { ...sessionRow(), sessionId: "session-replacement" };
+    const listed = createDeferred<SessionMembersListResult>();
+    const request = vi.fn((method: string) => {
+      if (method !== "session.members.list") {
+        throw new Error(`unexpected request: ${method}`);
+      }
+      return request.mock.calls.length === 1
+        ? listed.promise
+        : Promise.resolve(sharingResult(replacement));
+    });
+    const sessions = {
+      refreshReplacement: vi.fn(),
+    } as unknown as SessionCapability;
+    const { pane: testPane, state } = createSharingTestChatPane({
+      client: { request } as unknown as GatewayBrowserClient,
+      sessions,
+    });
+    const pane = testPane as SharingPane;
+    const pending = pane.loadSessionSharing(stale);
+    state.sessionsResult = sharingSessionsResult(replacement);
+    listed.resolve(sharingResult(stale));
+    await pending;
+
+    expect(pane.sessionSharingStates.has(pane.sessionSharingCacheKey(stale.key))).toBe(false);
+
+    await pane.loadSessionSharing(replacement);
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(pane.sessionSharingStates.get(pane.sessionSharingCacheKey(replacement.key))).toEqual({
+      loading: false,
+      result: sharingResult(replacement),
+    });
+  });
 });
 
 describe.each(mutations)("chat pane $name mutation connection ownership", (mutation) => {

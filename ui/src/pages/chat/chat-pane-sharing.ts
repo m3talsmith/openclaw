@@ -90,7 +90,19 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
     // gateway/account change bumps the generation and clears this cache, so a
     // request that resolves after the switch must be dropped rather than
     // overwrite the new connection's menu with the previous account's data.
-    this.setSessionSharingState(cacheKey, { ...current, loading: true, error: undefined });
+    // Object identity also owns this key's request slot: same-key session
+    // replacement or a forced reload must not let an older request win.
+    const loadingState = { ...current, loading: true, error: undefined };
+    const ownsLoadingState = () => this.sessionSharingStates.get(cacheKey) === loadingState;
+    const clearOwnedLoadingState = () => {
+      if (!ownsLoadingState()) {
+        return;
+      }
+      const next = new Map(this.sessionSharingStates);
+      next.delete(cacheKey);
+      this.sessionSharingStates = next;
+    };
+    this.setSessionSharingState(cacheKey, loadingState);
     try {
       const result = await scope.client.request<SessionMembersListResult>("session.members.list", {
         sessionKey: currentRow.key,
@@ -100,16 +112,24 @@ export abstract class ChatPaneSharing extends ChatPaneBase {
       });
       if (
         !this.isConnectionScopeCurrent(scope) ||
-        !this.currentSessionSharingRow(scope, currentRow)
+        !this.currentSessionSharingRow(scope, currentRow) ||
+        !ownsLoadingState()
       ) {
+        if (this.isConnectionScopeCurrent(scope)) {
+          clearOwnedLoadingState();
+        }
         return;
       }
       this.setSessionSharingState(cacheKey, { loading: false, result });
     } catch (error) {
       if (
         !this.isConnectionScopeCurrent(scope) ||
-        !this.currentSessionSharingRow(scope, currentRow)
+        !this.currentSessionSharingRow(scope, currentRow) ||
+        !ownsLoadingState()
       ) {
+        if (this.isConnectionScopeCurrent(scope)) {
+          clearOwnedLoadingState();
+        }
         return;
       }
       this.setSessionSharingState(cacheKey, { loading: false, error: String(error) });
