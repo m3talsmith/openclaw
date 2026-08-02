@@ -414,12 +414,13 @@ describe("WhatsApp dmPolicy precedence", () => {
     expect(readAllowFromStoreMock).not.toHaveBeenCalled();
   });
 
-  it("always allows same-phone DMs even when allowFrom is restrictive", async () => {
+  it("allows same-phone DMs when self-chat mode is enabled", async () => {
     const cfg = {
       channels: {
         whatsapp: {
           dmPolicy: "pairing",
           allowFrom: ["+15550001111"],
+          selfChatMode: true,
         },
       },
     };
@@ -433,7 +434,7 @@ describe("WhatsApp dmPolicy precedence", () => {
       senderE164: "+15550009999",
       group: false,
       pushName: "Owner",
-      isFromMe: false,
+      isFromMe: true,
       sock: { sendMessage: sendMessageMock },
       remoteJid: "15550009999@s.whatsapp.net",
     });
@@ -449,6 +450,34 @@ describe("WhatsApp dmPolicy precedence", () => {
     expect(commandAuthorized).toBe(true);
     expect(upsertPairingRequestMock).not.toHaveBeenCalled();
     expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks same-phone fromMe DMs when self-chat mode is disabled", async () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          dmPolicy: "pairing",
+          allowFrom: ["+15550009999"],
+          selfChatMode: false,
+        },
+      },
+    };
+    setAccessControlTestConfig(cfg);
+
+    const result = await checkInboundAccessControl({
+      cfg: getAccessControlTestConfig() as never,
+      accountId: "default",
+      from: "+15550009999",
+      selfE164: "+15550009999",
+      senderE164: "+15550009999",
+      group: false,
+      pushName: "Owner",
+      isFromMe: true,
+      sock: { sendMessage: sendMessageMock },
+      remoteJid: "15550009999@s.whatsapp.net",
+    });
+
+    expectSilentlyBlocked(result);
   });
 
   it("allows DMs from generic message sender access groups", async () => {

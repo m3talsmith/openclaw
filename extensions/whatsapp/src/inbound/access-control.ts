@@ -123,8 +123,14 @@ export async function checkInboundAccessControl(params: {
 
   // DM access control (secure defaults): "pairing" (default) / "allowlist" / "open" / "disabled".
   if (!params.group) {
-    if (params.isFromMe && !policy.isSamePhone(params.from)) {
-      logWhatsAppVerbose(params.verbose, "Skipping outbound DM (fromMe); no pairing reply needed.");
+    if (
+      params.isFromMe &&
+      (policy.account.selfChatMode === false || !policy.isSamePhone(params.from))
+    ) {
+      logWhatsAppVerbose(
+        params.verbose,
+        "Skipping outbound DM (fromMe); no inbound dispatch needed.",
+      );
       return blockedInboundAccess(policy);
     }
     if (senderAccess.decision === "block" && senderAccess.reasonCode === "dm_policy_disabled") {

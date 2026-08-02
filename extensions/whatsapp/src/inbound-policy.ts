@@ -46,7 +46,12 @@ function maybeSamePhoneDmAllowFrom(params: {
   policy: ResolvedWhatsAppInboundPolicy;
   dmSenderId?: string | null;
 }): string[] {
-  if (params.isGroup || !params.dmSenderId || !params.policy.isSamePhone(params.dmSenderId)) {
+  if (
+    params.isGroup ||
+    params.policy.account.selfChatMode === false ||
+    !params.dmSenderId ||
+    !params.policy.isSamePhone(params.dmSenderId)
+  ) {
     return [];
   }
   return [params.dmSenderId];

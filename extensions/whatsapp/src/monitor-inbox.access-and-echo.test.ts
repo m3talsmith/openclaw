@@ -135,25 +135,28 @@ describe("web monitor inbox", () => {
     await listener.close();
   });
 
-  it("allows same-phone messages even if not in allowFrom", async () => {
-    // Same-phone mode: when from === selfJid, should always be allowed
-    // This allows users to message themselves even with restrictive allowFrom
+  it("allows same-phone fromMe DMs when self-chat mode is omitted", async () => {
     mockLoadConfig.mockReturnValue(createAllowListConfig(["+111"]));
 
     const { onMessage, listener, sock } = await openInboxMonitor();
 
-    // Message from self (sock.user.id is "123@s.whatsapp.net" in mock)
-    const upsert = buildNotifyMessageUpsert({
-      id: "self1",
-      remoteJid: "123@s.whatsapp.net",
-      text: "self message",
-      timestamp: nowSeconds(60_000),
+    sock.ev.emit("messages.upsert", {
+      type: "notify",
+      messages: [
+        {
+          key: {
+            id: "self1",
+            fromMe: true,
+            remoteJid: "123@s.whatsapp.net",
+          },
+          message: { conversation: "self message" },
+          messageTimestamp: nowSeconds(60_000),
+          pushName: "Owner",
+        },
+      ],
     });
-
-    sock.ev.emit("messages.upsert", upsert);
     await waitForMessageCalls(onMessage, 1);
 
-    // Should allow self-messages even if not in allowFrom
     expect(onMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         admission: expect.objectContaining({
@@ -166,6 +169,44 @@ describe("web monitor inbox", () => {
         }),
       }),
     );
+
+    await listener.close();
+  });
+
+  it("blocks untracked same-phone fromMe DMs when self-chat mode is disabled", async () => {
+    mockLoadConfig.mockReturnValue({
+      channels: {
+        whatsapp: {
+          dmPolicy: "pairing",
+          allowFrom: ["+123"],
+          selfChatMode: false,
+        },
+      },
+      messages: DEFAULT_MESSAGES_CFG,
+    });
+
+    const { onMessage, listener, sock } = await openInboxMonitor();
+
+    sock.ev.emit("messages.upsert", {
+      type: "notify",
+      messages: [
+        {
+          key: {
+            id: "self-disabled-1",
+            fromMe: true,
+            remoteJid: "123@s.whatsapp.net",
+          },
+          message: { conversation: "disabled self message" },
+          messageTimestamp: nowSeconds(),
+          pushName: "Owner",
+        },
+      ],
+    });
+    await settleInboundWork();
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(upsertPairingRequestMock).not.toHaveBeenCalled();
+    expect(sock.sendMessage).not.toHaveBeenCalled();
 
     await listener.close();
   });
