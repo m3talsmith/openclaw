@@ -7,7 +7,7 @@ import type { ApplicationGatewaySnapshot } from "../app/gateway.ts";
 import { t } from "../i18n/index.ts";
 import { isGatewayMethodAdvertised } from "./gateway-methods.ts";
 
-export type SessionMethodOperatorScope = "operator.read" | SessionMutationOperatorScope;
+type SessionMethodOperatorScope = "operator.read" | SessionMutationOperatorScope;
 
 export type SessionMethodAccess =
   | { allowed: true; requiredScope: SessionMethodOperatorScope }
